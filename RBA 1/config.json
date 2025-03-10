@@ -1,0 +1,11 @@
+{
+    "database": {
+        "host": "sandman.co.in",
+        "port": "43306",
+        "user": "rbauser",
+        "password": "Rba_Data#2024",
+        "database_name": "rba_data"
+    },
+    "sql_file_path": "C:\\Users\\MPM Infosoft\\Downloads\\RBA 1\\query.sql",
+    "data_frequency": 300
+}
