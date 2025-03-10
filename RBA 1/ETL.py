@@ -45,97 +45,24 @@ engine = create_engine(f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_P
 query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
 df_hid = pd.read_sql(query, engine)
 
-# ✅ Helper Functions
-def remove_numeric_suffix(hid):
-    """Removes the last numeric part from hid for matching, but keeps the full hid for pattern extraction."""
-    match = re.search(r'^(.*?)-\d+[A-Za-z]*$', hid.strip())
-    return match.group(1) if match else hid
-
-def search_with_suffix(id_list, hid_list):
-    """Step 1: Match with Numeric Suffix and Component Suffix."""
+# ✅ Function to find pattern number
+def get_pattern_number(identification, hid_list):
     pattern_numbers = []
+    
+    id_list = identification.split('/#')[-1].split(',')
+    id_list = [item.strip().replace(" ", "") for item in id_list]
+    
     for id_entry in id_list:
-        for hid in hid_list:
-            if id_entry in hid:
-                try:
-                    pattern_numbers.append(int(hid.split('-')[-1]))
-                except ValueError:
-                    pass
+        matching_patterns = [int(hid.split('-')[-1]) for hid in hid_list if id_entry in hid]
+        if matching_patterns:
+            pattern_numbers.append(max(matching_patterns))
+
     return max(pattern_numbers) if pattern_numbers else None
-
-def direct_search(id_list, hid_list):
-    """Step 2: Directly search ID in hid List."""
-    pattern_numbers = []
-    merged_hid_list = [merge_suffixes(hid) for hid in id_list]
-    for id_entry in merged_hid_list:
-        for hid in hid_list:
-            if id_entry in hid:
-                try:
-                    pattern_numbers.append(int(hid.split('-')[-1]))
-                except ValueError:
-                    pass
-    return max(pattern_numbers) if pattern_numbers else None
-
-def numeric_search(id_list, hid_list):
-    """Step 3: Search only numeric part of ID in hid List."""
-    pattern_numbers = []
-    for id_entry in id_list:
-        numeric_part = ''.join(filter(str.isdigit, id_entry))
-        for hid in hid_list:
-            cleaned_hid = remove_numeric_suffix(hid)
-            if numeric_part in cleaned_hid:
-                try:
-                    pattern_numbers.append(int(hid.split('-')[-1]))
-                except ValueError:
-                    pass
-    return max(pattern_numbers) if pattern_numbers else None
-
-def extract_base_id(identification_list, hid_list):
-    pattern_numbers = []
-    for identification in identification_list:
-        match = re.search(r'\b([A-Za-z]*\d+)\b', identification)
-        if match:
-            data = match.group(1)
-            for hid in hid_list:
-                if re.fullmatch(rf'{re.escape(data)}-\d+[A-Za-z]*', hid):
-                    try:
-                        pattern_numbers.append(int(hid.split('-')[-1]))
-                    except ValueError:
-                        pass
-    return max(pattern_numbers) if pattern_numbers else None
-
-def extract_number_with_suffix(id_list, hid_list, suffix_list):
-    """Extract the first full number before and after '-', then combine with suffixes."""
-    pattern_numbers = []
-    for identification in id_list:
-        match = re.search(r'(\d+)-(\d+)', identification)
-        if match:
-            first_number = match.group(1)
-            for suffix in suffix_list:
-                extracted_value = first_number + suffix
-                for hid in hid_list:
-                    if extracted_value in hid:
-                        try:
-                            pattern_numbers.append(int(hid.split('-')[-1]))
-                        except ValueError:
-                            pass
-    return max(pattern_numbers) if pattern_numbers else None
-
-def get_component_suffixes(component_string):
-    """Map component names to their respective suffixes and return all possible suffixes."""
-    component_suffix_map = config['component_map']
-    components = [c.strip().upper() for c in component_string.split(',')]
-    suffixes = [suffix for c in components if c in component_suffix_map for suffix in component_suffix_map[c]]
-    return suffixes
-
-def merge_suffixes(hid):
-    """Merges suffixes split by `/` in the hid string."""
-    return re.sub(r'(\w+-\d+)([A-Za-z])/([A-Za-z])', r'\1\2\3', hid)
 
 # ✅ Fetch mould data
 def fetch_mould_data():
     today_date = datetime.datetime.today().strftime('%Y-%m-%d')
-    
+
     with open(sql_file_path, "r", encoding="utf-8") as file:
         sql_queries = file.read()
 
@@ -166,44 +93,27 @@ def process_data():
         print("⚠️ No new data available. Skipping JSON update.")
         return
 
-    def get_max_pattern(identification, hid_list):
-        parts = identification.split('/#')
-        component_string = parts[0].strip()
-        component_suffixes = get_component_suffixes(component_string)
-        id_list = parts[-1].split(',')
-        id_list = [''.join(re.sub(r'\s+', '', item)) for item in id_list]
-        merged_hid_list = [merge_suffixes(hid) for hid in id_list]
-        pattern_numbers = []
+    # ✅ Apply pattern search
+    missing_patterns = set()
+    df_id["Pattern number"] = df_id["PatternIdentification"].apply(lambda x: get_pattern_number(x, df_hid['hid'].tolist()))
 
-        for suffix in component_suffixes:
-            pattern_number = search_with_suffix([id_entry + suffix for id_entry in merged_hid_list], hid_list)
-            if pattern_number:
-                pattern_numbers.append(pattern_number)
+    for index, row in df_id.iterrows():
+        if pd.isna(row["Pattern number"]):
+            missing_patterns.add(f"Error: The pattern number is not found for identification: {row['PatternIdentification']}")
 
-        if not pattern_numbers:
-            pattern_number = direct_search(id_list, hid_list)
-            if pattern_number:
-                pattern_numbers.append(pattern_number)
-        if not pattern_numbers:
-            pattern_number = numeric_search(id_list, hid_list)
-            if pattern_number:
-                pattern_numbers.append(pattern_number)
-        if not pattern_numbers:
-            pattern_number = extract_base_id(id_list, hid_list)
-            if pattern_number:
-                pattern_numbers.append(pattern_number)
-        if not pattern_numbers:
-            pattern_number = extract_number_with_suffix(id_list, hid_list, component_suffixes)
-            if pattern_number:
-                pattern_numbers.append(pattern_number)
+    # ✅ Log missing pattern numbers
+    for error in sorted(missing_patterns):
+        print(error)
 
-        return max(pattern_numbers) if pattern_numbers else None
-
-    df_id["Pattern number"] = df_id["PatternIdentification"].apply(lambda x: get_max_pattern(x, df_hid['hid'].tolist()))
+    # ✅ Save to JSON
     df_id = df_id[config["columns_required"]]
-    
-    df_id.to_json("data.json", orient="records", indent=4)
-    print("✅ Data formatted and saved successfully.")
+    df_id.to_json("df_pattern.json", orient="records", indent=4)
+    print("Data saved successfully in JSON format: df_pattern.json")
+
+    # ✅ Print reference update
+    last_row = df_id.iloc[-1] if not df_id.empty else None
+    if last_row is not None:
+        print(f"🔄 Updated Reference: Production Date = {last_row['ProductionDate']}, Start Time = {last_row['StartTime']}")
 
 # ✅ Run the process every `data_frequency` minutes
 while True:
