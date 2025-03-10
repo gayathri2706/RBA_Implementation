@@ -1,0 +1,146 @@
+[
+    {
+        "ProductionDate":"25-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"00:22:06",
+        "EndTime":"04:44:47",
+        "TotalPourStatus":73
+    },
+    {
+        "ProductionDate":"26-02-2025",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":"13:44:59",
+        "EndTime":"14:47:42",
+        "TotalPourStatus":41
+    },
+    {
+        "ProductionDate":"27-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"19:00:24",
+        "EndTime":"23:59:03",
+        "TotalPourStatus":266
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":"08:38:26",
+        "EndTime":"18:59:49",
+        "TotalPourStatus":195
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"00:00:29",
+        "EndTime":"00:56:40",
+        "TotalPourStatus":34
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"00:57:28",
+        "EndTime":"01:07:55",
+        "TotalPourStatus":4
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"01:08:46",
+        "EndTime":"04:18:32",
+        "TotalPourStatus":140
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"04:18:56",
+        "EndTime":"04:31:38",
+        "TotalPourStatus":14
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":2620.0,
+        "StartTime":"04:32:02",
+        "EndTime":"06:45:07",
+        "TotalPourStatus":194
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":2618.0,
+        "StartTime":"21:14:29",
+        "EndTime":"22:29:26",
+        "TotalPourStatus":40
+    },
+    {
+        "ProductionDate":"28-02-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"22:30:02",
+        "EndTime":"23:59:31",
+        "TotalPourStatus":86
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"A",
+        "Pattern number":2620.0,
+        "StartTime":"08:07:42",
+        "EndTime":"08:47:23",
+        "TotalPourStatus":24
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":"08:47:48",
+        "EndTime":"10:39:26",
+        "TotalPourStatus":106
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":"10:39:51",
+        "EndTime":"18:45:10",
+        "TotalPourStatus":424
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"A",
+        "Pattern number":2618.0,
+        "StartTime":"18:47:40",
+        "EndTime":"18:50:49",
+        "TotalPourStatus":0
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"00:00:07",
+        "EndTime":"01:35:15",
+        "TotalPourStatus":87
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"01:35:49",
+        "EndTime":"04:58:13",
+        "TotalPourStatus":126
+    },
+    {
+        "ProductionDate":"01-03-2025",
+        "Shift":"B",
+        "Pattern number":null,
+        "StartTime":"04:59:22",
+        "EndTime":"06:11:53",
+        "TotalPourStatus":61
+    }
+]
