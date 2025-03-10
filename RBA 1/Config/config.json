@@ -16,10 +16,10 @@
         "password": "Rba_Data#2024",
         "database_name": "rba_data"
         },
-        "sql_file_path": "C:\\Users\\MPM Infosoft\\Downloads\\RBA 1\\query.sql",
+        "sql_file_path": "query.sql",
         "data_frequency": 600,
-        "api_url" : "http://128.199.231.118/upload/save_consumption_bookings",
-        "login_url": "http://128.199.231.118/j_spring_security_check",
-        "j_username": "shreeraj",
-        "j_password": "$Shreeraj@2023"
+        "api_url" : "https://sandman.co.in/upload/save_consumption_bookings",
+        "login_url": "https://sandman.co.in/j_spring_security_check",
+        "j_username": "rba",
+        "j_password": "@Sandman2023"
     }
