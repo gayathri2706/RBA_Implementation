@@ -1,0 +1,18 @@
+[
+    {
+        "ProductionDate":"2025-03-11",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":27491000,
+        "EndTime":38580000,
+        "TotalPourStatus":198.0
+    },
+    {
+        "ProductionDate":"2025-03-11",
+        "Shift":"A",
+        "Pattern number":null,
+        "StartTime":38603000,
+        "EndTime":45001000,
+        "TotalPourStatus":134.0
+    }
+]

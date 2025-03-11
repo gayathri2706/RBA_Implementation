@@ -42,18 +42,17 @@ db_config = config["database"]
 sql_file_path = config["sql_file_path"]
 data_frequency = config["data_frequency"]
 
+
 API_URL = config["api_url"]
 LOGIN_URL = config["login_url"]
 USERNAME = config["j_username"]
 PASSWORD = config["j_password"]
 
 #  Establish database connection
-engine = create_engine(
-    f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}")
+engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}")
 
 # #  Establish database connection for pattern master
 # engine = create_engine(f"mysql+pymysql://{pat_config['user']}:{pat_config['password']}@{pat_config['host']}:{pat_config['port']}/{pat_config['database_name']}")
-
 
 #  Fetch pattern components
 query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
@@ -119,7 +118,6 @@ def get_component_suffixes(component_string):
     suffixes = [suffix for c in components if c in component_suffix_map for suffix in component_suffix_map[c]]
     return suffixes
 
-
 def merge_suffixes(hid):
     """Merges suffixes split by `/` in the HID string."""
     return re.sub(r'(\w+-\d+)([A-Za-z])/([A-Za-z])', r'\1\2\3', hid)
@@ -135,16 +133,14 @@ def remove_last_suffix(hid_list):
 
 def extract_base_id(identification_list, hid_list):
     pattern_numbers = []
-
     for identification in identification_list:
         match = re.search(r'\b([A-Za-z]*\d+)\b', identification)
         if match:
             data = match.group(1)
-
             for hid in hid_list:
                 if re.fullmatch(rf'{re.escape(data)}-\d+[A-Za-z]*', hid):
                     try:
-                        pattern_numbers.append(int(hid.split('-')[-1]))
+                        pattern_numbers.append(int(hid.split('-')[-1])) 
                     except ValueError:
                         pass
 
@@ -160,13 +156,13 @@ def extract_number_with_suffix(id_list, hid_list, suffix_list):
         if match:
             first_number = match.group(1)
 
-            for suffix in suffix_list:
-                extracted_value = first_number + suffix
+            for suffix in suffix_list:  
+                extracted_value = first_number +  suffix  
 
                 for hid in hid_list:
                     if extracted_value in hid:
                         try:
-                            pattern_numbers.append(int(hid.split('-')[-1]))
+                            pattern_numbers.append(int(hid.split('-')[-1]))  
                         except ValueError:
                             pass
 
@@ -179,9 +175,9 @@ def get_max_pattern(identification, hid_list):
     component_suffixes = get_component_suffixes(component_string)
     id_list = parts[-1].split(',')
     if any('-' in item for item in id_list):
-        id_list = [''.join(re.sub(r'\s+', '', item)) for item in id_list]
+         id_list = [''.join(re.sub(r'\s+', '', item)) for item in id_list]
     else:
-        id_list = [re.sub(r'\s+', '-', item) for item in id_list]
+         id_list = [re.sub(r'\s+', '-', item) for item in id_list]
     merged_hid_list = [merge_suffixes(hid) for hid in id_list]
     pattern_numbers = []
 
@@ -194,6 +190,7 @@ def get_max_pattern(identification, hid_list):
         pattern_number = direct_search(id_list, hid_list)
         if pattern_number:
             pattern_numbers.append(pattern_number)
+
     # if not pattern_numbers:
     #     pattern_number = numeric_search(id_list, hid_list)
     #     if pattern_number:
@@ -247,7 +244,7 @@ def clean_json_data(df):
     # ✅ Ensure `date` is a numeric timestamp before conversion
     if "date" in df.columns:
         df["date"] = df["date"].apply(lambda x: datetime.datetime.fromtimestamp(x / 1000).strftime('%Y-%m-%d')
-        if isinstance(x, (int, float)) else x)
+                                      if isinstance(x, (int, float)) else x)
 
     # ✅ Convert `componentId` to integer if possible
     if "componentId" in df.columns:
@@ -264,7 +261,6 @@ def send_data_to_api(json_data):
     try:
         # ✅ Debug: Print JSON before sending
         logger.info(f"📤 JSON Payload Being Sent: , {json.dumps(json_data, indent=4)}")
-
         # ✅ Login to API
         session = requests.Session()
         login_payload = {"j_username": USERNAME, "j_password": PASSWORD}
@@ -294,7 +290,6 @@ def send_data_to_api(json_data):
             return
     except Exception as e:
         logger.error(f"❌ Unexpected error: {e}")  # ✅ Print error details
-
 
 #  Process data
 def process_data():
@@ -330,6 +325,7 @@ def process_data():
         df_id["date"] = pd.to_datetime(df_id["ProductionDate"]).dt.strftime('%Y-%m-%d')
     else:
         logger.error("❌ ERROR: 'ProductionDate' column is missing from DataFrame!")
+
         return  # Stop execution if missing
 
     # ✅ Convert `StartTime` and `EndTime` to Timedelta before extracting time
@@ -344,6 +340,7 @@ def process_data():
     df_id["noOfBoxesPoured"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
     df_id["totalMould"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
     df_id["unpouredMould"] = None
+
     df_id["foundryLine"] = df_id.apply(lambda x: {"pkey": 1}, axis=1)
     df_id["badBatches"] = None
     df_id["noOfBatches"] = None
@@ -373,3 +370,4 @@ while True:
     except Exception as e:
         logger.error(f" Unexpected error: {e}")
     time.sleep(data_frequency)
+
