@@ -17,8 +17,6 @@
         "password": "Rba_Data#2024",
         "database_name": "rba_data"
         },
-        "sql_file_path": "query.sql",
-        "data_frequency": 600,
         "pat_database": {
             "host": "localhost",
             "port": "33306",
