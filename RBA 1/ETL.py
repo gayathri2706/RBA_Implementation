@@ -17,7 +17,7 @@ logging.basicConfig(
     level=logging.DEBUG,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',  # Log message format
     handlers=[
-        logging.FileHandler('app.log'),  # Log messages to a file
+        #logging.FileHandler('app.log'),  # Log messages to a file
         logging.StreamHandler()          # Also output log messages to the console
     ]
 )
