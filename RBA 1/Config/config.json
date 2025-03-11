@@ -1,6 +1,7 @@
-{"columns_required":["ProductionDate","Shift","Pattern number",
-"StartTime","EndTime","TotalPourStatus"
-],
+{"columns_required":["date","shift","startTime",
+                            "endTime","componentId","totalMould","unpouredMould","noOfBoxesPoured",
+                            "foundryLine","badBatches","noOfBatches"
+                            ],
 "component_map": {
     "FRAME": ["F", "FR"],
     "FRM": ["F"],
@@ -18,8 +19,18 @@
         },
         "sql_file_path": "query.sql",
         "data_frequency": 600,
+        "pat_database": {
+            "host": "localhost",
+            "port": "33306",
+            "user": "rba",
+            "password": "#$@ndm@Ndb_2020&",
+            "database_name": "rba_sandman"
+            },
+        "sql_file_path": "query.sql",
+        "data_frequency": 600,
         "api_url" : "https://sandman.co.in/upload/save_consumption_bookings",
         "login_url": "https://sandman.co.in/j_spring_security_check",
         "j_username": "rba",
         "j_password": "@Sandman2023"
+
     }
