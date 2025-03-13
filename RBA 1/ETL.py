@@ -217,7 +217,8 @@ def fetch_mould_data():
     with open(sql_file_path, "r", encoding="utf-8") as file:
         sql_queries = file.read()
 
-    sql_queries = sql_queries.replace("'2025-03-07'", f"'{today_date}'")
+    #sql_queries = sql_queries.replace("'2025-03-07'", f"'{today_date}'")
+    sql_queries = sql_queries.replace("TimePour >= '2025-03-12 07:00:00'", f"TimePour >= '{today_date} 07:00:00'")
     dataframes = []
 
     with engine.connect() as connection:
