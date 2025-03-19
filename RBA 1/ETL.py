@@ -201,7 +201,8 @@ def fetch_mould_data():
     with open(sql_file_path, "r", encoding="utf-8") as file:
         sql_queries = file.read()
 
-    #sql_queries = sql_queries.replace("'2025-03-07'", f"'{today_date}'")
+
+    # Replace the full timestamp condition dynamically
     sql_queries = sql_queries.replace("TimePour >= '2025-03-12 07:00:00'", f"TimePour >= '{today_date} 07:00:00'")
     dataframes = []
 
@@ -321,12 +322,13 @@ def process_data():
 
     # ✅ Map values
     df_id["noOfBoxesPoured"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
-    df_id["totalMould"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
-    df_id["unpouredMould"] = None  
+    df_id["totalMould"] = df_id["TotalMouldMade"].where(df_id["TotalMouldMade"].notna(), None)
+    df_id["unpouredMould"] = df_id["UnpouredMould"].where(df_id["UnpouredMould"].notna(), None)  
     df_id["foundryLine"] = df_id.apply(lambda x: {"pkey": 1}, axis=1)
     df_id["badBatches"] = None
     df_id["noOfBatches"] = None
     df_id.rename(columns={"Shift": "shift"}, inplace=True)
+
 
     # ✅ Ensure only required columns are kept
     df_id = df_id[config["columns_required"]]
