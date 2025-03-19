@@ -2,16 +2,16 @@ SET @order_counter := 0;
 SET @prev_part_id := NULL;
 SET @prev_shift := NULL;
 SET @prev_date := NULL;
-
  
-
 SELECT  
    DATE_FORMAT(ProductionDate, '%Y-%m-%d') AS ProductionDate,
    Shift,
    PatternIdentification,
    TIME(Start_Time1) AS StartTime,
    TIME(End_Time2) AS EndTime,
-   TotalPourStatus
+   TotalPourStatus,
+   TotalMouldMade,
+   (TotalMouldMade - TotalPourStatus) AS UnpouredMould
 FROM (
    SELECT  
        MIN(AdjustedDate) AS ProductionDate,
@@ -19,7 +19,8 @@ FROM (
        PatternIdentification,
        MIN(CombinedDateTime) AS Start_Time1,
        MAX(CombinedDateTime) AS End_Time2,
-       SUM(PourStatus) AS TotalPourStatus
+       SUM(PourStatus) AS TotalPourStatus,
+       COUNT(*) AS TotalMouldMade
    FROM (
        SELECT  
            PatternIdentification,
@@ -42,14 +43,14 @@ FROM (
            @prev_date := AdjustedDate
        FROM (
            SELECT  
-               DATE(TimePour) AS `Date`,
-               TIME(TimePour) AS `Time`,
+               DATE(TimePour) AS Date,
+               TIME(TimePour) AS Time,
                CASE  
                    WHEN TIME(TimePour) BETWEEN '07:00:00' AND '18:59:59' THEN 'A'
                    WHEN TIME(TimePour) BETWEEN '19:00:00' AND '23:59:59'
                      OR TIME(TimePour) BETWEEN '00:00:00' AND '06:59:59' THEN 'B'
                    ELSE NULL
-               END AS `Shift`,
+               END AS Shift,
                CASE  
                    WHEN TIME(TimePour) < '07:00:00' THEN DATE_SUB(DATE(TimePour), INTERVAL 1 DAY)
                    ELSE DATE(TimePour)
@@ -58,7 +59,7 @@ FROM (
                PourStatus,
                TimePour
            FROM rba_data.moulding_machine_data
-           WHERE TimePour >= '2025-03-12 07:00:00'
+           WHERE TimePour >= '2025-03-13 07:00:00'
        ) AS Table2
        ORDER BY Date, Time
    ) AS numbered
@@ -66,4 +67,3 @@ FROM (
    ORDER BY ProductionDate, Start_Time1
 ) AS table3
 ORDER BY ProductionDate, Start_Time1;
- 
