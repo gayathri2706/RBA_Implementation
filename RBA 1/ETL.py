@@ -46,6 +46,7 @@ engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['passwor
 query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
 df_hid = pd.read_sql(query, engine)
 
+
 def remove_numeric_suffix(hid):
     """Removes the last numeric part from HID for matching, but keeps the full HID for pattern extraction."""
     match = re.search(r'^(.*?)-\d+[A-Za-z]*$', hid.strip())
@@ -61,7 +62,7 @@ def search_with_suffix(id_list, hid_list):
                     pattern_numbers.append(int(hid.split('-')[-1]))
                 except ValueError:
                     pass
-    return max(pattern_numbers) if pattern_numbers else None
+    return pattern_numbers if pattern_numbers else None
 
 def direct_search(id_list, hid_list):
     """Step 2: Directly search ID in HID List with exact match after removing the last suffix."""
@@ -70,14 +71,14 @@ def direct_search(id_list, hid_list):
 
     for id_entry in merged_hid_list:
         for hid in hid_list:
-            base_hid = "-".join(hid.split('-')[:-1])  # Remove the last suffix
-            if id_entry == base_hid:  # Exact match after removing suffix
+            base_hid = "-".join(hid.split('-')[:-1]) 
+            if id_entry == base_hid:  
                 try:
                     pattern_numbers.append(int(hid.split('-')[-1]))
                 except ValueError:
                     pass
 
-    return max(pattern_numbers) if pattern_numbers else None
+    return pattern_numbers if pattern_numbers else None
 
 def numeric_search(id_list, hid_list):
     """Step 3: Search only numeric part of ID in HID List."""
@@ -86,17 +87,17 @@ def numeric_search(id_list, hid_list):
         numeric_part = ''.join(filter(str.isdigit, id_entry))
       
         for hid in hid_list:
-            cleaned_hid= remove_numeric_suffix(hid)
+            cleaned_hid = remove_numeric_suffix(hid)
             if numeric_part in cleaned_hid:
                 try:
                     pattern_numbers.append(int(hid.split('-')[-1]))
                 except ValueError:
                     pass
-    return max(pattern_numbers) if pattern_numbers else None
+    return pattern_numbers if pattern_numbers else None
 
-def get_component_suffixes(component_string):
+def get_component_suffixes(component_string, config):
     """Map component names to their respective suffixes and return all possible suffixes."""
-    component_suffix_map =config['component_map']
+    component_suffix_map = config['component_map']
     components = [c.strip().upper() for c in component_string.split(',')]
     suffixes = [suffix for c in components if c in component_suffix_map for suffix in component_suffix_map[c]]
     return suffixes
@@ -127,73 +128,217 @@ def extract_base_id(identification_list, hid_list):
                     except ValueError:
                         pass
 
-    return max(pattern_numbers) if pattern_numbers else None
-
-
+    return pattern_numbers if pattern_numbers else None
 
 def extract_number_with_suffix(id_list, hid_list, suffix_list):
-    """Extract the first full number before and after '-', then combine with suffixes."""
+    """Extract all matching pattern numbers instead of only the max one."""
     pattern_numbers = []
 
     for identification in id_list:
         match = re.search(r'(\d+)-(\d+)', identification)
         if match:
-            first_number = match.group(1) 
+            first_number = match.group(1)
 
-            for suffix in suffix_list:  
-                extracted_value = first_number +  suffix  
+            for suffix in suffix_list:
+                extracted_value = first_number + suffix
 
                 for hid in hid_list:
                     if extracted_value in hid:
                         try:
-                            pattern_numbers.append(int(hid.split('-')[-1]))  
+                            pattern_numbers.append(int(hid.split('-')[-1]))
                         except ValueError:
                             pass
 
-    return max(pattern_numbers) if pattern_numbers else None
+    return pattern_numbers if pattern_numbers else None
+
+def count_pattern_occurrences(hid_list):
+    """Count how many times each pattern appears in the HID list."""
+    pattern_count = Counter(remove_numeric_suffix(hid) for hid in hid_list)
+    return pattern_count
 
 
-
-def get_max_pattern(identification, hid_list):
-    parts = identification.split('/#')
-    component_string = parts[0].strip()
-    component_suffixes = get_component_suffixes(component_string)
-    id_list = parts[-1].split(',')
-    if any('-' in item for item in id_list):
-         id_list = [''.join(re.sub(r'\s+', '', item)) for item in id_list]
+def split_identification(identification):
+    # Handle cases with and without brackets
+    match = re.match(r"(.+?)/#([\w-]+)\s*\(([^)]+)\)", identification)
+    if match:
+        main_part, bracket_part, extra_part = match.groups()
+        return main_part.strip(), bracket_part.strip(), extra_part.strip(),""
     else:
-         id_list = [re.sub(r'\s+', '-', item) for item in id_list]
-    merged_hid_list = [merge_suffixes(hid) for hid in id_list]
-    pattern_numbers = []
-
-    for suffix in component_suffixes:
-        pattern_number = search_with_suffix([id_entry + suffix for id_entry in merged_hid_list], hid_list)
-        if pattern_number:
-            pattern_numbers.append(pattern_number)
-
-    if not pattern_numbers:
-         pattern_number = direct_search(id_list, hid_list)
-         if pattern_number:
-             pattern_numbers.append(pattern_number)
-    # if not pattern_numbers:
-    #     pattern_number = numeric_search(id_list, hid_list)
-    #     if pattern_number:
-    #         pattern_numbers.append(pattern_number)
-    if not pattern_numbers:
-        pattern_number = extract_base_id(id_list, hid_list)
-        if pattern_number:
-            pattern_numbers.append(pattern_number)
-    if not pattern_numbers:
-        pattern_number = extract_number_with_suffix(id_list, hid_list,component_suffixes)
-        if pattern_number: 
-            pattern_numbers.append(pattern_number)
+        parts = identification.split('/#') 
+        parts_1=parts[1].split(',')#
+        parts_1.append(parts[0])
+        parts_1 = [parts_1[-1]] + parts_1[:-1]
+        if '&' in parts[0]:
+                parts = parts[0].split('&') + [parts[1]]
+                return parts[0].strip(), parts[1].strip(), parts[2].strip(),""
+        elif len(parts_1) > 2:
+            if len(parts_1)>=2:
+                return parts_1[0].strip(), parts_1[1].strip(), parts_1[2].strip(),""
+            else:
+                return parts_1[0].strip(), parts_1[1].strip(), parts_1[2].strip(),parts_1[3].strip()
+        elif len(parts) == 2:
+            if ',' in parts[1]:
+                parts_1 = parts[1].split(',')  # Create a list by splitting parts[1]
+                parts_1.append(parts[0])
+                parts_1 = [parts_1[-1]] + parts_1[:-1]
+                return parts_1[0].strip(), parts_1[1].strip(), parts_1[2].strip(),""
+            else:
+                return parts[0].strip(), parts[1].strip(), "",""
+        return identification.strip(), "", ""
     
-    if pattern_numbers: 
-            return max(pattern_numbers)
-    print(f"Error: The pattern number is not found for identification: {identification}")
-    return None
+def extract_base_identifier(identifier):
+    """Extracts only the relevant base part of an identifier and removes leading/trailing spaces."""
+    identifier = identifier.strip()  # Remove extra spaces
+    match = re.match(r'([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)', identifier)
+    return match.group(1) if match else identifier
+
+def get_best_pattern(identification, hid_list, df_hid,config):
+    #parts = identification.split('/#')
+    #component_string = parts[0].strip()
+
+    match = df_hid[df_hid['hid'] == identification]  # Filter rows where 'Hid' matches
+    if not match.empty:
+        return match['pattern_no'].values[0]  # Return the first matching 'Pattern No'
+    
+    else:    
+        component_string, id_string, extra_info,_ = split_identification(identification)
+        component_suffixes = get_component_suffixes(component_string,config)
+        if extra_info:
+            id_list = extra_info.split(',')
+        else:
+            id_list = id_string.split(',')
+
+        if any('-' in item for item in id_list):
+            id_list = [''.join(re.sub(r'\s+', '', item)) for item in id_list]
+        else:
+            id_list = [re.sub(r'\s+', '-', item) for item in id_list]
+
+        merged_hid_list = [merge_suffixes(hid) for hid in id_list]
+        pattern_numbers = []
+
+        # Step 1: Try matching with suffixes
+        for suffix in component_suffixes:
+            pattern_number = search_with_suffix([id_entry + suffix for id_entry in merged_hid_list], hid_list)
+            if pattern_number:
+                pattern_numbers.append(pattern_number)
+
+        if not pattern_numbers:
+            pattern_number = direct_search(id_list, hid_list)
+            if pattern_number:
+                pattern_numbers.append(pattern_number)
+
+        if not pattern_numbers:
+            pattern_number = extract_base_id(id_list, hid_list)
+            if pattern_number:
+                pattern_numbers.append(pattern_number)
+
+        if not pattern_numbers:
+            pattern_number = extract_number_with_suffix(id_list, hid_list, component_suffixes)
+            if pattern_number:
+                pattern_numbers.append(pattern_number)
+
+        if not pattern_numbers:
+            component_string, id_string, extra_info,_ = split_identification(identification)
+            id_list = id_string.split(',')
+        
+            matching_rows = df_hid[df_hid['hid'].str.contains('|'.join(id_list), na=False, case=False)]
+
+            if not matching_rows.empty:
+                # Convert 'PatternNo' column values to a list of integers
+                pattern_numbers = matching_rows['pattern_no'].dropna().astype(int).unique().tolist()  
+        
+        
+
+        if not pattern_numbers:
+            matching_rows = df_hid[df_hid['pattern_name'].str.contains('|'.join(id_list), na=False, case=False)]
+            if not matching_rows.empty:
+                pattern_numbers = matching_rows['pattern_no'].unique().tolist()
+
+        if not pattern_numbers:
+            parts = identification.split('/#')
+            numbers = re.findall(r'\d+', parts[1])
+            numbers = ''.join(numbers)  # Convert list to a string
+            if component_suffixes:
+                id_list = [numbers + suffix for suffix in component_suffixes]  # Concatenate with suffixes
+
+                matching_rows = df_hid[df_hid['hid'].str.contains('|'.join(id_list), na=False, case=False)]
+                
+                if not matching_rows.empty:
+                    # Convert 'PatternNo' column values to a list of integers
+                    pattern_numbers = matching_rows['pattern_no'].dropna().astype(int).unique().tolist()
+        if pattern_numbers:
+        # Flatten pattern_numbers if needed
+            pattern_numbers = [num for sublist in pattern_numbers for num in sublist] if any(isinstance(i, list) for i in pattern_numbers) else pattern_numbers
+
+            # Count occurrences in df_hid
+            pattern_counts = df_hid['pattern_no'].value_counts().to_dict()
+
+            # Get the count for each matched pattern number
+            pattern_info = [(num, pattern_counts.get(num, 0)) for num in pattern_numbers]
+
+            pattern_1 = list({num for num, count in pattern_info if count == 1})
+            pattern_2 = list({num for num, count in pattern_info if count >= 2})
+            if pattern_1:
+                unique_identifiers = set()
+                parts = identification.split('/#')
+                if len(parts)==2:
+                    identifier = parts[0]
+                    unique_identifiers.add(identifier.strip())
+
+            else:
+                pattern_id_col = 'hid'  # Column where identifiers exist
+
+                # Extract unique identifiers from PatternIdentification+
+                unique_identifiers = set()
+                parts = identification.split('/#')
+                if '&' in parts[0]:
+                    components = parts[0].split('&')  # Store split values in a variable
+                    component_suffixes_1 = get_component_suffixes(components[0].strip(), config)
+                    component_suffixes_2 = get_component_suffixes(components[1].strip(), config)
+
+                    for identifier in parts[1].split(','):
+                        identifier = identifier.strip()  # Ensure no extra spaces
+                        for suffix in component_suffixes_1 + component_suffixes_2:  # Combine both suffix lists
+                            unique_identifiers.add(identifier + suffix)
+                else:
+                    for identifier in parts[1].split(','):
+                        unique_identifiers.add(identifier.strip())
+
+                    # updated_identifiers = set()
+                    # for identifier in unique_identifiers:
+                    #     # Replace "BRAD" with "RBAD"
+                    #     new_id = identifier.replace("BRAD", "RBAD")
+                        
+                    #     # Ensure the identifier follows the expected format
+                    #     if not re.search(r'\D-\d+', new_id):  # Check if it already contains the correct format
+                    #         new_id = re.sub(r'(\D+)(\d+)', r'\1-\2', new_id)
+
+                    #     updated_identifiers.add(new_id)
+                    # unique_identifiers = updated_identifiers
+
+                for pattern in pattern_2:
+                    matching_rows = df_hid[df_hid['pattern_no'] == pattern]
+                    matched_ids = {extract_base_identifier(mid) for mid in matching_rows[pattern_id_col].tolist()}
+
+                    # Normalize unique_identifiers
+                    normalized_identifiers = {extract_base_identifier(uid) for uid in unique_identifiers}
+                    if len(normalized_identifiers) == len(matched_ids):
+                        # Check if all unique identifiers exist in matched_ids
+                        if all(any(identifier in mid for mid in matched_ids) for identifier in normalized_identifiers):
+                            return pattern
+                    else:
+                        if all(any(identifier in mid for mid in matched_ids) for identifier in normalized_identifiers):
+                            return pattern
 
 
+        
+            single_pattern = [num for num, count in pattern_info if count == 1]
+            if single_pattern:
+                return max(single_pattern) 
+    
+        print(f"Error: The pattern number is not found for identification: {identification}")
+        return None
+        
 #  Fetch mould data
 def fetch_mould_data():
     today_date = datetime.datetime.today().strftime('%Y-%m-%d')
@@ -203,10 +348,11 @@ def fetch_mould_data():
 
 
     # Replace the full timestamp condition dynamically
-    sql_queries = sql_queries.replace("TimePour >= '2025-03-12 07:00:00'", f"TimePour >= '{today_date} 07:00:00'")
+    sql_queries = sql_queries.replace("TimePour >= '2025-03-13 07:00:00'", f"TimePour >= '{today_date} 07:00:00'")
     dataframes = []
 
-    with engine.connect() as connection:
+    connection = engine.connect()  # Open connection explicitly
+    try:
         for statement in sql_queries.split(";"):
             statement = statement.strip()
             if not statement:
@@ -215,21 +361,25 @@ def fetch_mould_data():
                 result = connection.execute(text(statement))
                 if result.returns_rows:
                     df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    print(df)
                     if not df.empty:
                         print(f" Query Successful: {len(df)} rows fetched")
                         dataframes.append(df)
             except Exception as e:
                 print(f" SQL Execution Error: {e}")
+    finally:
+        connection.close()  # ✅ Explicitly close the connection
 
     return pd.concat(dataframes, ignore_index=True) if dataframes else pd.DataFrame()
 
 def clean_json_data(df):
     df = df.copy()
-
+    print(df.columns)
     # ✅ Ensure `date` is a numeric timestamp before conversion
     if "date" in df.columns:
         df["date"] = df["date"].apply(lambda x: datetime.datetime.fromtimestamp(x / 1000).strftime('%Y-%m-%d') 
                                       if isinstance(x, (int, float)) else x)
+    
 
     # ✅ Convert `componentId` to integer if possible
     if "componentId" in df.columns:
@@ -252,43 +402,46 @@ def send_data_to_api(json_data):
         login_response = session.post(LOGIN_URL, data=login_payload)
 
         if login_response.status_code == 200:
-            print("✅ Login successful!")
+            print(" Login successful!")
 
-            # ✅ Extract cookies
+            #  Extract cookies
             cookies = session.cookies.get_dict()
-            print("🍪 Cookies received:", cookies)
+            print(" Cookies received:", cookies)
 
-            # ✅ Send POST request with correctly formatted JSON
+            #  Send POST request with correctly formatted JSON
             headers = {
                 "Content-Type": "application/json",
                 "Cookie": f"JSESSIONID={cookies.get('JSESSIONID', '')}"
             }
 
-            # ✅ Send JSON properly
-            response = session.post(API_URL, json=json_data, headers=headers)  # ✅ FIXED
+            # Send JSON properly
+            response = session.post(API_URL, json=json_data, headers=headers)  #  FIXED
 
-            # ✅ Print API response
-            print("📩 Response Status Code:", response.status_code)
-            print("📩 Response Body:", response.text)
+            #  Print API response
+            print(" Response Status Code:", response.status_code)
+            print(" Response Body:", response.text)
         else:
-            print(f"❌ Login failed! Status Code: {login_response.status_code}, Response: {login_response.text}")
+            print(f" Login failed! Status Code: {login_response.status_code}, Response: {login_response.text}")
             return
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")  # ✅ Print error details
+        print(f" Unexpected error: {e}")  #  Print error details
 
 #  Process data
 def process_data():
     df_id = fetch_mould_data()
     if df_id.empty:
-        print("❌ No new data available. Skipping JSON update.")
+        print(" No new data available. Skipping JSON update.")
         return
-
-    # ✅ Apply pattern search
-    missing_patterns = set()
+    print(df_hid)
+    missing_patterns=()
     df_id = df_id[~df_id['PatternIdentification'].isna()]
-    df_id['componentId'] = df_id['PatternIdentification'].apply(lambda x: get_max_pattern(x, df_hid['hid'].tolist()))
 
-    # ✅ Drop NaN before conversion
+    df_id['componentId'] = df_id['PatternIdentification'].apply(
+        lambda x: get_best_pattern(x, df_hid['hid'].dropna().astype(str).tolist(), df_hid, config)
+    )
+    print(df_id)
+
+    #  Drop NaN before conversion
     df_id.dropna(subset=["componentId"], inplace=True)
     df_id["componentId"] = df_id["componentId"].astype(int)
 
@@ -296,31 +449,31 @@ def process_data():
         if pd.isna(row["componentId"]):
             missing_patterns.add(f"Error: The pattern number is not found for identification: {row['PatternIdentification']}")
 
-    # ✅ Log missing pattern numbers
+    #  Log missing pattern numbers
     for error in sorted(missing_patterns):
         print(error)
 
-    print(df_id)  # ✅ Debugging step
+    print(df_id)  #  Debugging step
 
     df_id["TotalPourStatus"] = df_id["TotalPourStatus"].astype(int)
 
-    # ✅ Ensure `ProductionDate` exists before conversion
+    #  Ensure `ProductionDate` exists before conversion
     if "ProductionDate" in df_id.columns:
         df_id["date"] = pd.to_datetime(df_id["ProductionDate"]).dt.strftime('%Y-%m-%d')
     else:
-        print("❌ ERROR: 'ProductionDate' column is missing from DataFrame!")
+        print(" ERROR: 'ProductionDate' column is missing from DataFrame!")
         return  # Stop execution if missing
-
-    # ✅ Convert `StartTime` and `EndTime` to Timedelta before extracting time
+    print(df_id)
+    #  Convert `StartTime` and `EndTime` to Timedelta before extracting time
     df_id["StartTime"] = pd.to_timedelta(df_id["StartTime"], errors='coerce')
     df_id["EndTime"] = pd.to_timedelta(df_id["EndTime"], errors='coerce')
 
-    # ✅ Extract only the `HH:MM:SS` part, removing "0 days"
+    #  Extract only the `HH:MM:SS` part, removing "0 days"
     df_id["startTime"] = df_id["StartTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
     df_id["endTime"] = df_id["EndTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
 
 
-    # ✅ Map values
+    #  Map values
     df_id["noOfBoxesPoured"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
     df_id["totalMould"] = df_id["TotalMouldMade"].where(df_id["TotalMouldMade"].notna(), None)
     df_id["unpouredMould"] = df_id["UnpouredMould"].where(df_id["UnpouredMould"].notna(), None)  
@@ -329,22 +482,25 @@ def process_data():
     df_id["noOfBatches"] = None
     df_id.rename(columns={"Shift": "shift"}, inplace=True)
 
-
-    # ✅ Ensure only required columns are kept
+   
+    #  Ensure only required columns are kept
     df_id = df_id[config["columns_required"]]
+    print(df_id.dtypes)
+    print(df_id)
 
-    # ✅ Clean JSON Data
+    df_id['unpouredMould']=df_id['unpouredMould'].astype(float)
     json_data = clean_json_data(df_id)
-    print(json.dumps(json_data, indent=4))  # ✅ Print final JSON for debugging
-    print("✅ Data formatted successfully.")
+    print(json_data)
+    print(json.dumps(json_data, indent=4))  #  Print final JSON for debugging
+    print(" Data formatted successfully.")
 
-    # ✅ Send data to API
+    #  Send data to API
     send_data_to_api(json_data)
 
-    # ✅ Print reference update
+    #  Print reference update
     last_row = df_id.iloc[-1] if not df_id.empty else None
     if last_row is not None:
-        print(f"✅ Updated Reference: Production Date = {last_row['date']}, Start Time = {last_row['startTime']}")
+        print(f" Updated Reference: Production Date = {last_row['date']}, Start Time = {last_row['startTime']}")
 
 #  Run the process every `data_frequency` minutes
 while True:
