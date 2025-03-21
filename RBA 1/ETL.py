@@ -42,13 +42,20 @@ engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['passwor
 # engine = create_engine(f"mysql+pymysql://{pat_config['user']}:{pat_config['password']}@{pat_config['host']}:{pat_config['port']}/{pat_config['database_name']}")
 
 
-#  Fetch pattern components
-query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
-df_hid = pd.read_sql(query, engine)
+def fetch_pattern_components():
+    query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
+    
+    connection = engine.connect()  # Open connection explicitly
+    try:
+        df_hid = pd.read_sql(query, connection)  # Read data
+    finally:
+        connection.close()  # ✅ Close connection explicitly
+    
+    return df_hid
 
 
 def remove_numeric_suffix(hid):
-    """Removes the last numeric part from HID for matching, but keeps the full HID for pattern extraction."""
+    """Removes the last numeric part from hid for matching, but keeps the full hid for pattern extraction."""
     match = re.search(r'^(.*?)-\d+[A-Za-z]*$', hid.strip())
     return match.group(1) if match else hid
 
@@ -65,7 +72,7 @@ def search_with_suffix(id_list, hid_list):
     return pattern_numbers if pattern_numbers else None
 
 def direct_search(id_list, hid_list):
-    """Step 2: Directly search ID in HID List with exact match after removing the last suffix."""
+    """Step 2: Directly search ID in hid List with exact match after removing the last suffix."""
     pattern_numbers = []
     merged_hid_list = [merge_suffixes(hid) for hid in id_list]
 
@@ -81,7 +88,7 @@ def direct_search(id_list, hid_list):
     return pattern_numbers if pattern_numbers else None
 
 def numeric_search(id_list, hid_list):
-    """Step 3: Search only numeric part of ID in HID List."""
+    """Step 3: Search only numeric part of ID in hid List."""
     pattern_numbers = []
     for id_entry in id_list:
         numeric_part = ''.join(filter(str.isdigit, id_entry))
@@ -103,7 +110,7 @@ def get_component_suffixes(component_string, config):
     return suffixes
 
 def merge_suffixes(hid):
-    """Merges suffixes split by `/` in the HID string."""
+    """Merges suffixes split by `/` in the hid string."""
     return re.sub(r'(\w+-\d+)([A-Za-z])/([A-Za-z])', r'\1\2\3', hid)
 
 def remove_last_suffix(hid_list):
@@ -152,7 +159,7 @@ def extract_number_with_suffix(id_list, hid_list, suffix_list):
     return pattern_numbers if pattern_numbers else None
 
 def count_pattern_occurrences(hid_list):
-    """Count how many times each pattern appears in the HID list."""
+    """Count how many times each pattern appears in the hid list."""
     pattern_count = Counter(remove_numeric_suffix(hid) for hid in hid_list)
     return pattern_count
 
@@ -196,7 +203,7 @@ def get_best_pattern(identification, hid_list, df_hid,config):
     #parts = identification.split('/#')
     #component_string = parts[0].strip()
 
-    match = df_hid[df_hid['hid'] == identification]  # Filter rows where 'Hid' matches
+    match = df_hid[df_hid['hid'] == identification]  # Filter rows where 'hid' matches
     if not match.empty:
         return match['pattern_no'].values[0]  # Return the first matching 'Pattern No'
     
@@ -429,6 +436,7 @@ def send_data_to_api(json_data):
 #  Process data
 def process_data():
     df_id = fetch_mould_data()
+    df_hid = fetch_pattern_components()
     if df_id.empty:
         print(" No new data available. Skipping JSON update.")
         return
