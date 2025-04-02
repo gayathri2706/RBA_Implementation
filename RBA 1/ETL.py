@@ -47,7 +47,8 @@ def fetch_pattern_components():
     
     connection = engine.connect()  # Open connection explicitly
     try:
-        df_hid = pd.read_sql(query, connection)  # Read data
+        df_hid = pd.read_sql(query, connection)
+       
     finally:
         connection.close()  # ✅ Close connection explicitly
     
@@ -202,12 +203,13 @@ def extract_base_identifier(identifier):
 def get_best_pattern(identification, hid_list, df_hid,config):
     #parts = identification.split('/#')
     #component_string = parts[0].strip()
+    #print(identification)
 
     match = df_hid[df_hid['hid'] == identification]  # Filter rows where 'hid' matches
     if not match.empty:
         return match['pattern_no'].values[0]  # Return the first matching 'Pattern No'
     
-    else:    
+    elif '/#' in identification:   
         component_string, id_string, extra_info,_ = split_identification(identification)
         component_suffixes = get_component_suffixes(component_string,config)
         if extra_info:
