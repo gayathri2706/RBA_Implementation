@@ -59,7 +59,7 @@ FROM (
                PourStatus,
                TimePour
            FROM rba_data.moulding_machine_data
-           WHERE TimePour >= '2025-03-13 07:00:00'
+           WHERE TimePour >= NOW() - INTERVAL 1 DAY 
        ) AS Table2
        ORDER BY Date, Time
    ) AS numbered
