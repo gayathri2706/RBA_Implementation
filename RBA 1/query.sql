@@ -1,8 +1,10 @@
+-- Initialize variables
 SET @order_counter := 0;
 SET @prev_part_id := NULL;
 SET @prev_shift := NULL;
 SET @prev_date := NULL;
  
+-- Main query
 SELECT  
    DATE_FORMAT(ProductionDate, '%Y-%m-%d') AS ProductionDate,
    Shift,
@@ -59,7 +61,8 @@ FROM (
                PourStatus,
                TimePour
            FROM rba_data.moulding_machine_data
-           WHERE TimePour >= NOW() - INTERVAL 1 DAY 
+           WHERE TimePour >= CURDATE() - INTERVAL 1 DAY
+             AND TimePour < CURDATE() + INTERVAL 1 DAY
        ) AS Table2
        ORDER BY Date, Time
    ) AS numbered
