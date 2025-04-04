@@ -28,6 +28,7 @@ db_config = config["database"]
 sql_file_path = config["sql_file_path"]
 data_frequency = config["data_frequency"]
 
+LAST_SENT_START_TIME = None  # 🔁 Initialize this global variable
 
 
 API_URL = config["api_url"]
@@ -357,7 +358,6 @@ def fetch_mould_data():
 
 
     # Replace the full timestamp condition dynamically
-    sql_queries = sql_queries.replace("TimePour >= '2025-03-13 07:00:00'", f"TimePour >= '{today_date} 07:00:00'")
     dataframes = []
 
     connection = engine.connect()  # Open connection explicitly
@@ -386,8 +386,8 @@ def clean_json_data(df):
     print(df.columns)
     # ✅ Ensure `date` is a numeric timestamp before conversion
     if "date" in df.columns:
-        df["date"] = df["date"].apply(lambda x: datetime.datetime.fromtimestamp(x / 1000).strftime('%Y-%m-%d') 
-                                      if isinstance(x, (int, float)) else x)
+        df["date"] = df["date"].apply(lambda x: datetime.datetime.fromtimestamp(x / (1000 if x > 1e10 else 1))
+                              .strftime('%Y-%m-%d') if isinstance(x, (int, float)) else x)
     
 
     # ✅ Convert `componentId` to integer if possible
@@ -435,15 +435,55 @@ def send_data_to_api(json_data):
     except Exception as e:
         print(f" Unexpected error: {e}")  #  Print error details
 
+def handle_api_update(df_id, latest_record, LAST_SENT_START_TIME):
+    latest_start_time = latest_record['startTime']
+    latest_end_time = latest_record['endTime']
+    prev_record = df_id.iloc[-2] if len(df_id) > 1 else None
+
+    # Case 1: First run
+    if LAST_SENT_START_TIME is None:
+        print("🔄 First run: Sending initial data to API.")
+        json_data = clean_json_data(df_id)
+        send_data_to_api(json_data)
+        return latest_start_time
+
+    # Case 2: StartTime is same
+    elif LAST_SENT_START_TIME == latest_start_time:
+        if prev_record is not None and latest_end_time != prev_record['endTime']:
+            print(f"🆕 EndTime changed for same StartTime = {latest_start_time}. Overwriting latest record.")
+            json_data = clean_json_data(latest_record.to_frame().T)
+            send_data_to_api(json_data)
+        else:
+            print("✅ No change in StartTime or EndTime. Skipping API update.")
+        return LAST_SENT_START_TIME
+
+    # Case 3: StartTime changed
+    else:
+        print(f"🆕 StartTime changed from {LAST_SENT_START_TIME} ➝ {latest_start_time}")
+
+        if prev_record is not None:
+            json_prev = clean_json_data(prev_record.to_frame().T)
+            print(f"✏️ Overwriting previous record: StartTime = {prev_record['startTime']}")
+            send_data_to_api(json_prev)
+
+        json_latest = clean_json_data(latest_record.to_frame().T)
+        print(f"➕ Inserting new record: StartTime = {latest_start_time}")
+        send_data_to_api(json_latest)
+
+        return latest_start_time
+
+
 #  Process data
 def process_data():
+    global LAST_SENT_START_TIME      
     df_id = fetch_mould_data()
     df_hid = fetch_pattern_components()
+
     if df_id.empty:
         print(" No new data available. Skipping JSON update.")
         return
-    print(df_hid)
-    missing_patterns=()
+        
+    missing_patterns=set()
     df_id = df_id[~df_id['PatternIdentification'].isna()]
 
     df_id['componentId'] = df_id['PatternIdentification'].apply(
@@ -473,7 +513,7 @@ def process_data():
     else:
         print(" ERROR: 'ProductionDate' column is missing from DataFrame!")
         return  # Stop execution if missing
-    print(df_id)
+    
     #  Convert `StartTime` and `EndTime` to Timedelta before extracting time
     df_id["StartTime"] = pd.to_timedelta(df_id["StartTime"], errors='coerce')
     df_id["EndTime"] = pd.to_timedelta(df_id["EndTime"], errors='coerce')
@@ -481,7 +521,6 @@ def process_data():
     #  Extract only the `HH:MM:SS` part, removing "0 days"
     df_id["startTime"] = df_id["StartTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
     df_id["endTime"] = df_id["EndTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
-
 
     #  Map values
     df_id["noOfBoxesPoured"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
@@ -499,18 +538,15 @@ def process_data():
     print(df_id)
 
     df_id['unpouredMould']=df_id['unpouredMould'].astype(float)
-    json_data = clean_json_data(df_id)
-    print(json_data)
-    print(json.dumps(json_data, indent=4))  #  Print final JSON for debugging
-    print(" Data formatted successfully.")
 
-    #  Send data to API
-    send_data_to_api(json_data)
+    # ✅ Process only the latest record
+    latest_record = df_id.iloc[-1]
 
-    #  Print reference update
-    last_row = df_id.iloc[-1] if not df_id.empty else None
-    if last_row is not None:
-        print(f" Updated Reference: Production Date = {last_row['date']}, Start Time = {last_row['startTime']}")
+    # ✅ Call the new handler here
+    LAST_SENT_START_TIME = handle_api_update(df_id, latest_record, LAST_SENT_START_TIME)
+
+    print(f"📌 Updated Reference: Production Date = {latest_record['date']}, Start Time = {latest_record['startTime']}")
+
 
 #  Run the process every `data_frequency` minutes
 while True:
