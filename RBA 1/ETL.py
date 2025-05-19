@@ -1,3 +1,4 @@
+from typing import Counter
 import pandas as pd
 import numpy as np
 import json
@@ -37,7 +38,7 @@ USERNAME = config["j_username"]
 PASSWORD = config["j_password"]
 
 #  Establish database connection
-engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}")
+engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database_name']}",execution_options={"stream_results": True})
 
 # #  Establish database connection for pattern master
 # engine = create_engine(f"mysql+pymysql://{pat_config['user']}:{pat_config['password']}@{pat_config['host']}:{pat_config['port']}/{pat_config['database_name']}")
@@ -45,11 +46,11 @@ engine = create_engine(f"mysql+pymysql://{db_config['user']}:{db_config['passwor
 
 def fetch_pattern_components():
     query = "SELECT date, pattern_no, pattern_name, hid FROM rba_data.pattern_component;"
-    
     connection = engine.connect()  # Open connection explicitly
     try:
         df_hid = pd.read_sql(query, connection)
-       
+        df_hid.to_excel("pattern_component.xlsx", index=False)
+
     finally:
         connection.close()  # ✅ Close connection explicitly
     
@@ -258,7 +259,6 @@ def get_best_pattern(identification, hid_list, df_hid,config):
                 pattern_numbers = matching_rows['pattern_no'].dropna().astype(int).unique().tolist()  
         
         
-
         if not pattern_numbers:
             matching_rows = df_hid[df_hid['pattern_name'].str.contains('|'.join(id_list), na=False, case=False)]
             if not matching_rows.empty:
@@ -514,13 +514,24 @@ def process_data():
         print(" ERROR: 'ProductionDate' column is missing from DataFrame!")
         return  # Stop execution if missing
     
-    #  Convert `StartTime` and `EndTime` to Timedelta before extracting time
+    #  Convert `StartTime` and `EndTime` to Timedelta
     df_id["StartTime"] = pd.to_timedelta(df_id["StartTime"], errors='coerce')
     df_id["EndTime"] = pd.to_timedelta(df_id["EndTime"], errors='coerce')
 
-    #  Extract only the `HH:MM:SS` part, removing "0 days"
-    df_id["startTime"] = df_id["StartTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
-    df_id["endTime"] = df_id["EndTime"].apply(lambda x: str(x).split()[-1] if pd.notna(x) else None)
+    def extract_start_end_times(row):
+        base_date = pd.to_datetime(row['date'])
+        start_td = row['StartTime']
+        end_td = row['EndTime']
+        if pd.isna(start_td) or pd.isna(end_td):
+            return pd.Series([None, None])
+        start_datetime = base_date + start_td
+        end_datetime = base_date + end_td
+        # If EndTime is less than StartTime, add one day to EndTime for overnight shifts
+        if end_datetime < start_datetime:
+            end_datetime += pd.Timedelta(days=1)
+        return pd.Series([start_datetime.strftime("%H:%M:%S"), end_datetime.strftime("%H:%M:%S")])
+
+    df_id[["startTime", "endTime"]] = df_id.apply(extract_start_end_times, axis=1)
 
     #  Map values
     df_id["noOfBoxesPoured"] = df_id["TotalPourStatus"].where(df_id["TotalPourStatus"].notna(), None)
