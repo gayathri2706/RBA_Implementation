@@ -334,6 +334,7 @@ def process_additive_etl(line_id, from_date, to_date, connection):
 
     # Select only the needed columns
     df = matched_df[columns_to_select]
+    df['water_actual'] = df['total_water_ltr']
 
     # Sort by timestamp
     df = df.sort_values(by=['timestamp'])
