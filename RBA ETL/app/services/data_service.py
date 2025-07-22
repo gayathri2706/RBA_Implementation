@@ -371,6 +371,19 @@ def process_additive_etl(line_id, from_date, to_date, connection):
 
     # Check column names match the target schema
     print("Final columns for DB insert:", df.columns.tolist())
+
+    # Insert data to the correct table with timestamp column, but only if there are new records
+    if not df.empty:
+        print(f"Writing {len(df)} new records to table")
+
+        # Insert a new log entry with the latest timestamp
+        if latest_timestamp:
+            insert_logger_entry(connection, latest_timestamp)
+
+        print("ETL process completed successfully.")
+    else:
+        print("No new data to insert. ETL skipped.")
+
     return df, latest_timestamp
 
 
@@ -395,3 +408,17 @@ def compute_timestamp(row):
         return base_datetime + timedelta(days=1)
     else:
         return base_datetime
+
+
+def insert_logger_entry(connection, timestamp):
+    """Insert a new row in the logger table with the current timestamp"""
+    try:
+        with connection.cursor() as cursor:
+            sql = "INSERT INTO additive_report_dummy_logger_id (last_timestamp) VALUES (%s)"
+            cursor.execute(sql, (timestamp,))
+
+        connection.commit()
+        print(f"New logger entry created: Last timestamp = {timestamp}")
+    except Exception as e:
+        print(f"Error inserting logger entry: {e}")
+        connection.rollback()

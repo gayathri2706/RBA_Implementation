@@ -18,6 +18,7 @@
     "co_final_percentage": "compactability_smc_pct",
     "cosp_percent": "cosp_percentage_pct",
     "temp_st1c": "temperature_c",
+    "water_actual": "total_water_ltr",
     "total_seconds": "total_seconds",
     "total_water": "total_water_ltr",
     "moisture_percentage": "moisture_smc_pct",
