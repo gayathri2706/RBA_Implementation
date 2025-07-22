@@ -67,6 +67,7 @@ def get_consumption_bookings(line_id, from_date, to_date):
         .query(ConsumptionBooking).filter(cond)
 
     cons_booking_db_data = qry.all()
+    app.logger.info("total consumption bookings: %d", len(cons_booking_db_data))
 
     cons_booking_df = pd.DataFrame([obj.__dict__ for obj in cons_booking_db_data])
     cons_booking_df.drop(['_sa_instance_state', 'version', 'created_by', 'created_on', 'pkey', 'deleted',
