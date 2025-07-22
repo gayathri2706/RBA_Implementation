@@ -207,13 +207,13 @@ def run_etl(config, engine, connection, target_table):
         # Fill missing columns with NaN
         for col in missing_columns:
             matched_df[col] = np.nan
- 
+    df['water_actual'] = df['total_water_ltr']
     # Select only the needed columns
     df = matched_df[columns_to_select]
     
     # Sort by timestamp
     df = df.sort_values(by=['timestamp'])
-   
+    
     # Rename columns to match the target database schema
     output_columns = config["output_columns"].copy()
     
