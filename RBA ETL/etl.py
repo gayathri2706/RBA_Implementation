@@ -207,13 +207,13 @@ def run_etl(config, engine, connection, target_table):
         # Fill missing columns with NaN
         for col in missing_columns:
             matched_df[col] = np.nan
+    
     # Select only the needed columns
     df = matched_df[columns_to_select]
     df['water_actual'] = df['total_water']
-
     # Sort by timestamp
     df = df.sort_values(by=['timestamp'])
-    
+   
     # Rename columns to match the target database schema
     output_columns = config["output_columns"].copy()
     
@@ -311,9 +311,10 @@ if __name__ == "__main__":
                 traceback.print_exc()
     
             print(f"Next ETL run in 60 seconds. Press Ctrl+C to exit cleanly.")
-            time.sleep(60) # Wait for 60 seconds before the next run
+            time.sleep(60)  # Wait for 1 minute before the next run
     except KeyboardInterrupt:
         print("ETL process terminated by user.")
     finally:
         connection.close()
         print("Database connection closed.")
+        
