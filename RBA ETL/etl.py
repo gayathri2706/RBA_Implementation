@@ -107,7 +107,7 @@ def run_etl(config, engine, connection, target_table):
         smc_df['date'] = smc_df['date'].astype(str)
         smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
         smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
-        smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
+        smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M:%S')
         smc_df = smc_df.sort_values('datetime')
         return smc_df
  
@@ -131,10 +131,6 @@ def run_etl(config, engine, connection, target_table):
     print("Processing component data...")
     prod_data['StartTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['start_time']))
     prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
-   
-    # Fix end times that cross midnight
-    midnight_crossings = prod_data['EndTime'] < prod_data['StartTime']
-    prod_data.loc[midnight_crossings, 'EndTime'] += pd.Timedelta(days=1)
    
     # Create a lookup dictionary for faster component_id lookups
     component_ranges = []
@@ -169,20 +165,30 @@ def run_etl(config, engine, connection, target_table):
     matched_df['component_id'] = matched_df['datetime'].astype(str).apply(get_component_id)
     matched_df['mixer_name'] = config['Mixer Name']
    
-    # Assign shift based on time
-    def assign_shift(row):
-        shift_a_start = datetime.strptime(config["shift_time"]["A"][0], "%H:%M:%S").time()
-        shift_b_start = datetime.strptime(config["shift_time"]["B"][0], "%H:%M:%S").time()
+  
+
+    matched_df.rename(columns={'datetime': 'timestamp'}, inplace=True)
+
+    # List of columns to select (excluding date and time, including timestamp)
+    columns_to_select = [col for col in config["columns_to_select"] if col not in ['date', 'time']] 
+    columns_to_select.insert(0, 'timestamp')  # Add timestamp as the first column
+    
+    # Select only the needed columns
+    df = matched_df[columns_to_select]
+    df['water_actual'] = df['total_water']
+
+    # Check if all required columns exist
+    missing_columns = [col for col in columns_to_select if col not in df.columns]
+    if missing_columns:
+        print(f"Warning: Missing columns in dataframe: {missing_columns}")
+        print("Available columns:", df.columns.tolist())
        
-        if shift_a_start <= row.time() < shift_b_start:
-            return 'A'
-        else:
-            return 'B'
-   
-    matched_df['shift'] = matched_df['datetime'].apply(lambda dt: assign_shift(dt))
- 
+        # Fill missing columns with NaN
+        for col in missing_columns:
+            df[col] = np.nan
+
     # Create the timestamp column properly accounting for shift
-    def compute_timestamp(row):
+    def compute_actual_datetime(row):
         base_datetime = datetime.combine(row['date'], row['time'])
        
         # Adjust for B shift times after midnight
@@ -192,34 +198,13 @@ def run_etl(config, engine, connection, target_table):
             return base_datetime
  
     # Create the timestamp column
-    matched_df['timestamp'] = matched_df.apply(compute_timestamp, axis=1)
-    
-    # List of columns to select (excluding date and time, including timestamp)
-    columns_to_select = [col for col in config["columns_to_select"] if col not in ['date', 'time']]
-    columns_to_select.insert(0, 'timestamp')  # Add timestamp as the first column
-    
-    # Check if all required columns exist
-    missing_columns = [col for col in columns_to_select if col not in matched_df.columns]
-    if missing_columns:
-        print(f"Warning: Missing columns in dataframe: {missing_columns}")
-        print("Available columns:", matched_df.columns.tolist())
-       
-        # Fill missing columns with NaN
-        for col in missing_columns:
-            matched_df[col] = np.nan
-    
-    # Select only the needed columns
-    df = matched_df[columns_to_select]
-    df['water_actual'] = df['total_water']
-    # Sort by timestamp
-    df = df.sort_values(by=['timestamp'])
-   
+    df['ActualDateTime'] = matched_df.apply(compute_actual_datetime, axis=1)
+    df = df.sort_values(by=['ActualDateTime'])
+    df.drop(columns=['ActualDateTime'], inplace=True)
+
+
     # Rename columns to match the target database schema
     output_columns = config["output_columns"].copy()
-    
-    # Ensure timestamp is included in output columns mapping
-    if 'timestamp' not in output_columns:
-        output_columns['timestamp'] = 'timestamp'
     
     # Apply column renaming
     df.rename(columns=output_columns, inplace=True)
