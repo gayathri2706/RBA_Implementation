@@ -40,7 +40,7 @@ def get_smc_data(line_id, from_date, to_date, config):
         axis=1
     )
     smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
-    smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
+    smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M:%S')
     smc_df = smc_df.sort_values('datetime')
 
     print(smc_df.head(5))
@@ -277,10 +277,6 @@ def process_additive_etl(line_id, from_date, to_date, connection):
     prod_data['EndTime'] = prod_data.apply(lambda row: datetime.combine(row['date'], row['end_time']), axis=1)
     #prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
 
-    # Fix end times that cross midnight
-    midnight_crossings = prod_data['EndTime'] < prod_data['StartTime']
-    prod_data.loc[midnight_crossings, 'EndTime'] += pd.Timedelta(days=1)
-
     component_ranges = []
     for _, row in prod_data.iterrows():
         component_ranges.append({
@@ -313,38 +309,33 @@ def process_additive_etl(line_id, from_date, to_date, connection):
     matched_df['component_id'] = matched_df['datetime'].astype(str).apply(get_component_id)
     matched_df['mixer_name'] = config['Mixer Name']
 
-    matched_df['shift'] = matched_df['datetime'].apply(lambda dt: assign_shift(dt, config))
-
-    # Create the timestamp column
-    matched_df['timestamp'] = matched_df.apply(compute_timestamp, axis=1)
+    matched_df.rename(columns={'datetime': 'timestamp'}, inplace=True)
 
     # List of columns to select (excluding date and time, including timestamp)
     columns_to_select = [col for col in config["columns_to_select"] if col not in ['date', 'time']]
     columns_to_select.insert(0, 'timestamp')  # Add timestamp as the first column
 
-    # Check if all required columns exist
-    missing_columns = [col for col in columns_to_select if col not in matched_df.columns]
-    if missing_columns:
-        print(f"Warning: Missing columns in dataframe: {missing_columns}")
-        print("Available columns:", matched_df.columns.tolist())
-
-        # Fill missing columns with NaN
-        for col in missing_columns:
-            matched_df[col] = np.nan
-
     # Select only the needed columns
     df = matched_df[columns_to_select]
     df['water_actual'] = df['total_water']
 
-    # Sort by timestamp
-    df = df.sort_values(by=['timestamp'])
+    # Check if all required columns exist
+    missing_columns = [col for col in columns_to_select if col not in df.columns]
+    if missing_columns:
+        print(f"Warning: Missing columns in dataframe: {missing_columns}")
+        print("Available columns:", df.columns.tolist())
+
+        # Fill missing columns with NaN
+        for col in missing_columns:
+            df[col] = np.nan
+
+        # Create the timestamp column
+    df['ActualDateTime'] = matched_df.apply(compute_actual_datetime, axis=1)
+    df = df.sort_values(by=['ActualDateTime'])
+    df.drop(columns=['ActualDateTime'], inplace=True)
 
     # Rename columns to match the target database schema
     output_columns = config["output_columns"].copy()
-
-    # Ensure timestamp is included in output columns mapping
-    if 'timestamp' not in output_columns:
-        output_columns['timestamp'] = 'timestamp'
 
     # Apply column renaming
     df.rename(columns=output_columns, inplace=True)
@@ -401,7 +392,7 @@ def assign_shift(row, config):
 
 
 # Create the timestamp column properly accounting for shift
-def compute_timestamp(row):
+def compute_actual_datetime(row):
     base_datetime = datetime.combine(row['date'], row['time'])
 
     # Adjust for B shift times after midnight
