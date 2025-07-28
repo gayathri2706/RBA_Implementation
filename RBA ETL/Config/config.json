@@ -6,7 +6,7 @@
   "Batch_reset": ["date", "shift"],
   "Mixer Name": "Mixer 1",
   "columns_to_select": [
-    "shift", "mixer_name", "batch_counter", "component_id",
+    "shift","mixer_name", "date", "time", "batch_counter", "component_id",
     "recycle_sand_set_point", "recycle_sand_actual", "bentonite_set_point", "bentonite_actual",
     "coal_dust_set_point", "coal_dust_actual", "fss_set_point", "fss_actual",
     "water_set_point", "water_actual", "inert_fines_set_point", "inert_fines_actual",
