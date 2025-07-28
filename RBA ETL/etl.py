@@ -18,7 +18,7 @@ def get_last_processed_timestamp(connection):
     try:
         with connection.cursor() as cursor:
             # Get the most recent row by ID (descending order)
-            sql = "SELECT last_timestamp FROM additive_report_dummy_logger_id ORDER BY id DESC LIMIT 1"
+            sql = "SELECT last_timestamp FROM additive_report_dummy_test_logger_id ORDER BY id DESC LIMIT 1"
             cursor.execute(sql)
             result = cursor.fetchone()
             
@@ -34,7 +34,7 @@ def insert_logger_entry(connection, timestamp):
     """Insert a new row in the logger table with the current timestamp"""
     try:
         with connection.cursor() as cursor:
-            sql = "INSERT INTO additive_report_dummy_logger_id (last_timestamp) VALUES (%s)"
+            sql = "INSERT INTO additive_report_dummy_test_logger_id (last_timestamp) VALUES (%s)"
             cursor.execute(sql, (timestamp,))
         
         connection.commit()
@@ -107,7 +107,7 @@ def run_etl(config, engine, connection, target_table):
         smc_df['date'] = smc_df['date'].astype(str)
         smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
         smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
-        smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M:%S')
+        smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
         smc_df = smc_df.sort_values('datetime')
         return smc_df
  
@@ -122,9 +122,6 @@ def run_etl(config, engine, connection, target_table):
         direction='nearest',
     )
  
-    # Extract temporary date and time parts for processing
-    matched_df['date'] = matched_df['datetime'].dt.date
-    matched_df['time'] = matched_df['datetime'].dt.time
     matched_df = matched_df.sort_values(['date', 'time'])
  
     # Process product data for component lookup
@@ -132,79 +129,51 @@ def run_etl(config, engine, connection, target_table):
     prod_data['StartTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['start_time']))
     prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
    
-    # Create a lookup dictionary for faster component_id lookups
-    component_ranges = []
-    for _, row in prod_data.iterrows():
-        component_ranges.append({
-            'start': row['StartTime'],
-            'end': row['EndTime'],
-            'component_id': row['component_id'],
-            'span_hours': (row['EndTime'] - row['StartTime']).total_seconds() / 3600
-        })
    
-    @lru_cache(maxsize=1000)
-    def get_component_id(dt_str):
-        dt = pd.Timestamp(dt_str)
-        dt_next_day = dt + pd.Timedelta(days=1)
-       
-        # First try with the original datetime
-        for comp_range in component_ranges:
-            if comp_range['start'] <= dt <= comp_range['end']:
-                return comp_range['component_id']
-       
-        # For multi-day components, check next day
-        for comp_range in component_ranges:
-            if comp_range['span_hours'] > 12:  # Only check for long-running components
-                if comp_range['start'] <= dt_next_day <= comp_range['end']:
-                    return comp_range['component_id']
-       
+    def get_component_id(dt):
+        for _, row in prod_data.iterrows():
+            start = row['StartTime']
+            end = row['EndTime']
+            if end < start:
+                end += pd.Timedelta(days=1)
+            dt_check = dt
+            if dt < start and end - start > pd.Timedelta(hours=12): 
+                dt_check += pd.Timedelta(days=1)
+
+            if start <= dt_check <= end:
+                return row['component_id']
         return None
- 
-    # Apply the component lookup function
-    print("Matching components to time ranges...")
-    matched_df['component_id'] = matched_df['datetime'].astype(str).apply(get_component_id)
+
+
+    matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
     matched_df['mixer_name'] = config['Mixer Name']
    
-  
-
-    matched_df.rename(columns={'datetime': 'timestamp'}, inplace=True)
-
-    # List of columns to select (excluding date and time, including timestamp)
-    columns_to_select = [col for col in config["columns_to_select"] if col not in ['date', 'time']] 
-    columns_to_select.insert(0, 'timestamp')  # Add timestamp as the first column
-    
-    # Select only the needed columns
-    df = matched_df[columns_to_select]
+    df = matched_df[config["columns_to_select"]]
     df['water_actual'] = df['total_water']
 
-    # Check if all required columns exist
-    missing_columns = [col for col in columns_to_select if col not in df.columns]
-    if missing_columns:
-        print(f"Warning: Missing columns in dataframe: {missing_columns}")
-        print("Available columns:", df.columns.tolist())
-       
-        # Fill missing columns with NaN
-        for col in missing_columns:
-            df[col] = np.nan
+    df['date'] = pd.to_datetime(df['date'])
+    df['time'] = pd.to_timedelta(df['time'].astype(str)).apply(lambda x: (datetime.min + x).time())
 
-    # Create the timestamp column properly accounting for shift
     def compute_actual_datetime(row):
         base_datetime = datetime.combine(row['date'], row['time'])
-       
-        # Adjust for B shift times after midnight
+        
         if row['shift'] == 'B' and row['time'] < datetime.strptime("07:00", "%H:%M").time():
             return base_datetime + timedelta(days=1)  
         else:
             return base_datetime
- 
-    # Create the timestamp column
-    df['ActualDateTime'] = matched_df.apply(compute_actual_datetime, axis=1)
-    df = df.sort_values(by=['ActualDateTime'])
-    df.drop(columns=['ActualDateTime'], inplace=True)
 
-
+    df['timestamp'] = df.apply(compute_actual_datetime, axis=1)
+    df['date']=df['date'].dt.date
+    
+    # Sort by timestamp
+    df = df.sort_values(by=['timestamp'])
+   
     # Rename columns to match the target database schema
     output_columns = config["output_columns"].copy()
+    
+    # Ensure timestamp is included in output columns mapping
+    if 'timestamp' not in output_columns:
+        output_columns['timestamp'] = 'timestamp'
     
     # Apply column renaming
     df.rename(columns=output_columns, inplace=True)
@@ -265,7 +234,7 @@ if __name__ == "__main__":
     )
     
     # Define target table
-    target_table = "additive_report_dummy_rename"
+    target_table = "additive_report_dummy_rename_test"
    
     print("Starting ETL process...")
  
@@ -302,4 +271,3 @@ if __name__ == "__main__":
     finally:
         connection.close()
         print("Database connection closed.")
-        
