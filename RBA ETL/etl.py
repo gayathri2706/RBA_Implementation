@@ -177,7 +177,13 @@ def run_etl(config, engine, connection, target_table):
     
     # Apply column renaming
     df.rename(columns=output_columns, inplace=True)
-   
+    
+    float_cols = df.select_dtypes(include=['float64']).columns
+    df[float_cols] = df[float_cols].round(2)
+
+    # Show sample data
+    print("Sample of new data to be inserted:")
+    print(df.head())
     # Filter out records that already exist in the database
     if last_timestamp is not None:
         new_records = df[df['timestamp'] > last_timestamp]
@@ -195,9 +201,6 @@ def run_etl(config, engine, connection, target_table):
     # Get the latest timestamp from the new records
     latest_timestamp = df['timestamp'].max()
     
-    # Show sample data
-    print("Sample of new data to be inserted:")
-    print(df.head())
    
     # Check column names match the target schema
     print("Final columns for DB insert:", df.columns.tolist())
