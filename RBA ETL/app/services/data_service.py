@@ -198,7 +198,8 @@ def run_etl(line_id, from_date, to_date):
         df, latest_timestamp = process_additive_etl(line_id, from_date, to_date, connection)
 
         column_mapping = {
-            "timestamp": "date",
+            "timestamp": "timeStamp",
+            "date" : "date",
             "shift": "shift",
             "mixer_name": "mixerName",
             "batch_counter": "batchCounter",
@@ -316,6 +317,20 @@ def process_additive_etl(line_id, from_date, to_date, connection):
 
     # Apply column renaming
     df.rename(columns=output_columns, inplace=True)
+
+    float_cols = df.select_dtypes(include=['float64']).columns
+    df[float_cols] = df[float_cols].round(2)
+
+    #for smc cols which hold str as object, so need conversion
+    cols_to_round = [
+        'compactability_smc_pct', 'cosp_percentage_pct', 'temperature_c',
+        'total_seconds', 'total_water_ltr', 'moisture_smc_pct',
+        'wd1_ltr', 'co1_pct', 'water_actual'
+    ]
+
+    # Convert to float and round to 2 decimal places
+    for col in cols_to_round:
+        df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
 
     # Filter out records that already exist in the database
     if last_timestamp is not None:
