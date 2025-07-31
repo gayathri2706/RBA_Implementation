@@ -15,7 +15,7 @@ from flask import current_app as app
 from sqlalchemy import and_, func
 from sqlalchemy import create_engine
 
-from ..entities.models import PreparedSand, SMCData, Customer, ConsumptionBooking, FoundryLine
+from ..entities.models import PreparedSand, SMCData, Customer, ConsumptionBooking, FoundryLine, ScadaData
 from ..errors.exceptions import SandmanError
 
 
@@ -165,7 +165,7 @@ def clean_actual_columns(df: pd.DataFrame, column_pairs: List[Tuple[str, str]]) 
     return df
 
 
-def run_etl(line_id, from_date, to_date):
+def run_rba_etl(line_id, from_date, to_date):
     response = dict()
     connection = None
 
@@ -195,7 +195,7 @@ def run_etl(line_id, from_date, to_date):
             cursorclass=pymysql.cursors.DictCursor
         )
 
-        df, latest_timestamp = process_additive_etl(line_id, from_date, to_date, connection)
+        df, latest_timestamp = process_rba_additive_etl(line_id, from_date, to_date, connection)
 
         column_mapping = {
             "timestamp": "timeStamp",
@@ -246,7 +246,7 @@ def run_etl(line_id, from_date, to_date):
 
 
 
-def process_additive_etl(line_id, from_date, to_date, connection):
+def process_rba_additive_etl(line_id, from_date, to_date, connection):
     config = get_config()
 
     df_add = get_additive_raw_data(line_id, config, connection)
@@ -281,15 +281,17 @@ def process_additive_etl(line_id, from_date, to_date, connection):
         for _, row in prod_data.iterrows():
             start = row['StartTime']
             end = row['EndTime']
-            if end < start:
-                end += pd.Timedelta(days=1)
-            dt_check = dt
-            if dt < start and end - start > pd.Timedelta(hours=12):
-                dt_check += pd.Timedelta(days=1)
 
-            if start <= dt_check <= end:
-                return row['component_id']
+            # Shift that crosses midnight but is still part of the same foundry day
+            if end < start:
+                if dt >= start or dt <= end:
+                    return row['component_id']
+            else:
+                if start <= dt <= end:
+                    return row['component_id']
+
         return None
+
     # Apply the component lookup function
     print("Matching components to time ranges...")
     matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
@@ -405,3 +407,153 @@ def insert_logger_entry(connection, timestamp):
     except Exception as e:
         print(f"Error inserting logger entry: {e}")
         connection.rollback()
+
+def run_etl():
+    return
+
+def get_scada_data(line_id, from_date, to_date, config):
+    cond = and_(ScadaData.foundry_line_pkey == line_id, ScadaData.date >= from_date, ScadaData.date <= to_date)
+    # columns = ['date', 'time', 'component_id', 'additive_json']
+    qry = global_thread_local.SESSION.query(ScadaData).filter(cond)
+
+    scada_data = qry.all()
+    app.logger.info("total scada data row: %d", len(scada_data))
+    '''
+    if scada_data is None or len(scada_data) == 0:
+        raise SandmanError("Scada data not found")
+    '''
+
+    scada_data_sets = []
+    for scada in scada_data:
+        scada_dict = dict()
+        scada_dict['Date'] = scada.date
+        scada_time_hrsmins = datetime.datetime.strptime(scada.time.strftime("%H:%M"), "%H:%M")
+        scada_dict['Time'] = scada_time_hrsmins.strftime("%H:%M")
+        scada_dict['Component Id'] = scada.component_id
+        if scada.additive_json is not None:
+            additive_map = json.loads(scada.additive_json)
+
+            if 'bentonite' in additive_map:
+                scada_dict['Bentonite'] = additive_map['bentonite']
+            if 'coal' in additive_map:
+                scada_dict['Coal'] = additive_map['coal']
+            if 'newSand' in additive_map:
+                scada_dict['NewSand'] = additive_map['newSand']
+            if 'freshSilicaSand' in additive_map:
+                scada_dict['NewSand'] = additive_map['freshSilicaSand']
+
+        scada_data_sets.append(scada_dict.copy())
+
+    scada_df = pd.DataFrame(scada_data_sets)
+
+    skip_conv_columns = ['Date', 'Time', 'Component Id', 'pkey', '_sa_instance_state']
+    decimal_cols = [col for col, dt in scada_df.dtypes.items() if dt == object]
+    for column in decimal_cols:
+        if column not in skip_conv_columns:
+            scada_df[column] = scada_df[column].astype(float)
+    '''
+    if config["is_scada"]:
+        try:
+            #scada_df = scada_df[scada_df['Component Id'].isin(list(comp_df['Component ID'].unique()))]
+            if config["scada_component_name"]:
+                scada_df = scada_df[scada_df["Component Id"].isin(list(
+                    comp_df[config["comp_master_cols"]["comp_name"]].unique()))]
+            else:
+                scada_df = scada_df[scada_df["Component Id"].isin(list(
+                    comp_df[config["comp_master_cols"]["component_id"]].unique()))]
+        except (NameError, KeyError):
+            scada_df = None
+    else:
+        scada_df = None
+    '''
+
+    scada_df['Datetime'] = pd.to_datetime(scada_df['Date'].astype(str)
+                                          + " " + scada_df['Time'], format='%Y-%m-%d %H:%M')
+    scada_df= date_adjust_scada(scada_df,"Datetime",True, config)
+
+    rename_dict = get_column_mapping(config['columns_to_rename'])
+    scada_df.rename(columns = rename_dict,inplace =True)
+
+    return scada_df
+
+
+
+def date_adjust_scada(data: pd.DataFrame, col_name: str, to_foundry: bool, config):
+    shift_cutoff = pd.to_datetime(config["shift_time"]["A"][0]).time()
+    multiplier = 1 if to_foundry else -1
+
+    time_mask = data[col_name].dt.time < shift_cutoff
+
+    data["Datetime"] = data["Datetime"] + pd.to_timedelta(time_mask.astype(int) * -1 * multiplier, unit='D')
+    return data
+
+
+def get_column_mapping(dict1):
+    rename_dict = {}
+    for key,value in dict1.items():
+        rename_dict[value] = key
+    return rename_dict
+
+
+def get_munjal_config():
+    cd = os.getcwd()
+    print(cd)
+    config_dir = os.path.join(cd, "Config")
+    config_file_path = os.path.join(config_dir, "munjal_config.json")
+
+    # Load configuration
+    with open(config_file_path, "r") as config_file:
+        config = json.load(config_file)
+
+    return config
+
+
+def run_munjal_etl(line_id, from_date, to_date):
+    config = get_munjal_config()
+
+    smc_df = get_smc_data(line_id, from_date, to_date, config)
+    scada_df = get_scada_data(line_id, from_date, to_date, config)
+    
+    matched_df = pd.merge_asof(
+        smc_df,
+        scada_df,
+        on='Datetime',
+        direction='forward'
+    )
+
+    matched_df['Mixer Name'] = config['Mixer Name']
+
+    matched_df['Water Actual'] = matched_df['Total Water (ltr)']
+    matched_df.rename(columns={'Date_x': 'Date', 'Time_x': 'Time'}, inplace=True)
+    matched_df['Recycle sand Actual'] = 2500
+
+    matched_df['Date'] = pd.to_datetime(matched_df['Date'], format='%Y-%m-%d')
+    matched_df['Time'] = pd.to_datetime(matched_df['Time'].astype(str)).dt.time
+
+    def compute_actual_datetime_munjal(row):
+        base_date = row['Date']
+        time = row['Time']
+        shift = row['Shift']
+        base_datetime = datetime.combine(base_date, time)
+
+        # Only shift date forward for early morning times
+        if shift == 'C' and time < datetime.strptime("07:00", "%H:%M").time() and time < datetime.strptime("23:00",
+                                                                                                           "%H:%M").time():
+            return base_datetime + timedelta(days=1)
+        else:
+            return base_datetime
+
+    matched_df['timestamp'] = matched_df.apply(compute_actual_datetime_munjal, axis=1)
+    matched_df = matched_df.sort_values(by=['timestamp'])
+
+    # matched_df.to_excel("matched_data.xlsx", index=False)
+    df = matched_df[config["columns_to_select"]]
+
+    # Convert columns to appropriate data types
+    float_cols = df.select_dtypes(include=['float64']).columns
+    df[float_cols] = df[float_cols].round(2)
+
+    # Optional: Format Date before saving
+    df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    df['timestamp'] = df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    print(df[['timestamp', 'Date']].head())

@@ -3,8 +3,7 @@ from flask import Blueprint, request, jsonify
 from ..security.authorization import key_auth
 #from ..services.ui_service import load_measured_java_to_ui_names
 
-from ..services.data_service import get_consumption_bookings, get_additive_raw_data, get_smc_data, run_etl
-
+from ..services.data_service import get_consumption_bookings, get_additive_raw_data, get_smc_data, run_etl, run_rba_etl
 
 from datetime import datetime
 
@@ -33,7 +32,7 @@ def process_additive_etl():
     #get_consumption_bookings(line_id, date, date)
     #get_additive_raw_data(line_id)
     #get_smc_data(line_id, date, date)
-    response = run_etl(line_id, date, date)
+    response = run_rba_etl(line_id, date, date)
 
 
     return jsonify(response)

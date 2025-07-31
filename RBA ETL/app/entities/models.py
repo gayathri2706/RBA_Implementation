@@ -132,6 +132,8 @@ class BlendingModelTest(base):
         'exclude_properties': ['foundry_line', 'foundry_line_group']
     }
 
+class ScadaData(base):
+    __tablename__ = 'scada_data'
 
 class VCSPModel(base):
     __tablename__ = 'vcsp_models'
