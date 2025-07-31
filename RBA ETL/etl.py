@@ -134,16 +134,15 @@ def run_etl(config, engine, connection, target_table):
         for _, row in prod_data.iterrows():
             start = row['StartTime']
             end = row['EndTime']
+    
+            # Shift that crosses midnight but is still part of the same foundry day
             if end < start:
-                end += pd.Timedelta(days=1)
-            dt_check = dt
-            if dt < start and end - start > pd.Timedelta(hours=12): 
-                dt_check += pd.Timedelta(days=1)
-
-            if start <= dt_check <= end:
-                return row['component_id']
+                if dt >= start or dt <= end:
+                    return row['component_id']
+            else:
+                if start <= dt <= end:
+                    return row['component_id']
         return None
-
 
     matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
     matched_df['mixer_name'] = config['Mixer Name']
