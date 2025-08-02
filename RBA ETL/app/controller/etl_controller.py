@@ -28,11 +28,12 @@ def fetch_sand_params():
 def process_additive_etl():
     line_id = int(request.form['foundry_line'])
     date = datetime.strptime(request.form['date'], '%d-%b-%Y')
+    customer_id = int(request.form['customer'])
 
     #get_consumption_bookings(line_id, date, date)
     #get_additive_raw_data(line_id)
     #get_smc_data(line_id, date, date)
-    response = run_rba_etl(line_id, date, date)
+    response = run_etl(customer_id,line_id, date, date)
 
 
     return jsonify(response)

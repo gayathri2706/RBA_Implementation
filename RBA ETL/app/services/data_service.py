@@ -33,18 +33,23 @@ def get_smc_data(line_id, from_date, to_date, config):
     smc_df = pd.DataFrame([obj.__dict__ for obj in smc_data])
     smc_df.drop(['_sa_instance_state'], axis=1, inplace=True)
 
-    #smc_df['date'] = smc_df['date'].astype(str)
-    #smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
+    print(smc_df.dtypes)
+    return smc_df
+
+
+def smc_data_processing_rba(smc_df, config):
+    # smc_df['date'] = smc_df['date'].astype(str)
+    # smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
     smc_df['datetime'] = smc_df.apply(
         lambda row: datetime.combine(row['date'], row['time']),
         axis=1
     )
+    print(smc_df.dtypes)
     smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
     smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
     smc_df = smc_df.sort_values('datetime')
 
     print(smc_df.head(5))
-    return smc_df
 
 
 def read_customer(customer_id):
@@ -251,6 +256,7 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
 
     df_add = get_additive_raw_data(line_id, config, connection)
     smc_df = get_smc_data(line_id, from_date, to_date, config)
+    smc_data_processing_rba(smc_df, config)
     prod_data = get_consumption_bookings(line_id, from_date, to_date)
 
     last_timestamp = get_last_processed_timestamp(connection)
@@ -408,8 +414,33 @@ def insert_logger_entry(connection, timestamp):
         print(f"Error inserting logger entry: {e}")
         connection.rollback()
 
-def run_etl():
-    return
+def run_etl(customer_id, line_id, from_date, to_date):
+    response = None
+    customer = read_customer(customer_id)
+    if 'munjal' in customer.name.lower() and 'kiriu' in customer.name.lower():
+        response = run_munjal_etl(line_id, from_date, to_date)
+    elif 'rba' in customer.name.lower():
+        response = run_rba_etl(line_id, from_date, to_date)
+    else:
+        app.logger.error("Additive ETL is not enabled for customer: " + customer.name)
+
+    return response
+
+
+def smc_data_preprocessing_munjal(smc_df, config):
+    #smc_df['Date']=smc_df['date'].astype(str)
+    #smc_df['Datetime']=smc_df['Date']+" "+ smc_df['time']
+
+    smc_df['Datetime'] = smc_df.apply(
+        lambda row: datetime.combine(row['Date'], row['Time']),
+        axis=1
+    )
+
+    smc_df['Batch Counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
+
+    smc_df['Datetime'] = pd.to_datetime(smc_df['Datetime'],format='%Y-%m-%d %H:%M')
+    print(smc_df.head())
+
 
 def get_scada_data(line_id, from_date, to_date, config):
     cond = and_(ScadaData.foundry_line_pkey == line_id, ScadaData.date >= from_date, ScadaData.date <= to_date)
@@ -427,7 +458,7 @@ def get_scada_data(line_id, from_date, to_date, config):
     for scada in scada_data:
         scada_dict = dict()
         scada_dict['Date'] = scada.date
-        scada_time_hrsmins = datetime.datetime.strptime(scada.time.strftime("%H:%M"), "%H:%M")
+        scada_time_hrsmins = datetime.strptime(scada.time.strftime("%H:%M"), "%H:%M")
         scada_dict['Time'] = scada_time_hrsmins.strftime("%H:%M")
         scada_dict['Component Id'] = scada.component_id
         if scada.additive_json is not None:
@@ -512,8 +543,24 @@ def run_munjal_etl(line_id, from_date, to_date):
     config = get_munjal_config()
 
     smc_df = get_smc_data(line_id, from_date, to_date, config)
+
+    column_maps = {'date': 'Date', 'time': 'Time', 'shift': 'Shift',
+                   "co_final_percentage" : "Compactability SMC (%)",
+                   "cosp_percent": "COSP Percentage (%)",
+                   "temp_st1c": "Temperature (C)",
+                   "total_seconds": "Total Seconds (seconds)",
+                   "total_water": "Total Water (ltr)",
+                   "moisture_percentage": "Moisture SMC (%)",
+                   "wd1": "WD1 (ltr)",
+                   "co1": "CO1 (%)"
+                   }
+    smc_df = smc_df.rename(columns=column_maps)
+    smc_data_preprocessing_munjal(smc_df, config)
     scada_df = get_scada_data(line_id, from_date, to_date, config)
-    
+
+    smc_df = smc_df.sort_values('Datetime')
+    scada_df = scada_df.sort_values('Datetime')
+
     matched_df = pd.merge_asof(
         smc_df,
         scada_df,
@@ -554,6 +601,43 @@ def run_munjal_etl(line_id, from_date, to_date):
     df[float_cols] = df[float_cols].round(2)
 
     # Optional: Format Date before saving
-    df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
-    df['timestamp'] = df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    #df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+    #df['timestamp'] = df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    print(df.dtypes)
+    df["Time"] = df["Time"].apply(
+        lambda t: t.strftime("%H:%M:%S") if pd.notnull(t) else None
+    )
     print(df[['timestamp', 'Date']].head())
+
+    mapping = {
+        "timestamp": "timeStamp",
+        "Date": "date",
+        "Time": "time",
+        "Shift": "shift",
+        "Mixer Name": "mixerName",
+        "Batch Counter": "batchCounter",
+        "Component ID": "componentId",
+        "Recycle sand Actual": "recycleSandActual",
+        "Bentonite Actual": "bentoniteActual",
+        "Coal Dust Actual": "coalDustActual",
+        "FSS Actual": "fssActual",
+        "Water Actual": "waterActual",
+        "Compactability SMC (%)": "compactabilitySmcPct",
+        "COSP Percentage (%)": "cospPercentagePct",
+        "Temperature (C)": "temperatureC",
+        "Total Seconds (seconds)": "totalSeconds",
+        "Total Water (ltr)": "totalWaterLtr",
+        "Moisture SMC (%)": "moistureSmcPct",
+        "WD1 (ltr)": "wd1Ltr",
+        "CO1 (%)": "co1Pct"
+    }
+
+    df = df.rename(columns=mapping)
+
+    response = dict()
+    response["status"] = 200
+    response["message"] = "success"
+    #response['latest_timestamp'] = latest_timestamp
+    response['additive_data'] = df.to_dict(orient='records')
+
+    return  response
