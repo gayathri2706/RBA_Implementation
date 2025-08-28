@@ -54,9 +54,10 @@ def run_etl(config, engine, connection, target_table):
     
     # Load data from database
     print("Loading source data...")
-    smc_df = pd.read_sql("SELECT * FROM prepared_sand_extra_test", engine)
-    df_add = pd.read_sql("SELECT * FROM additive_data_v2", engine)
-    prod_data = pd.read_sql("SELECT * FROM consumption_booking_test", engine)
+    smc_df = pd.read_sql("SELECT * FROM prepared_sand_extra_test where date>= '2025-08-20 00:00:00'", engine)
+    df_add = pd.read_sql("SELECT * FROM additive_data_v2 where datetime>= '2025-08-20 00:00:00'", engine)
+    prod_data = pd.read_sql("SELECT * FROM consumption_booking_test where date>= '2025-08-20 00:00:00'", engine)
+ 
  
     # Convert datetime string to pandas datetime
     df_add['datetime'] = pd.to_datetime(df_add['datetime'], format='%Y-%m-%d %H:%M:%S')
@@ -108,12 +109,16 @@ def run_etl(config, engine, connection, target_table):
         smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
         smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
         smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
-        smc_df = smc_df.sort_values('datetime')
         return smc_df
  
     smc_df = smc_data_preprocessing(smc_df)
-    df_add = df_add.sort_values('datetime')
- 
+    
+    smc_df = smc_df.sort_values('datetime').reset_index(drop=True)
+    df_add = df_add.sort_values('datetime').reset_index(drop=True) 
+    
+    print(smc_df['datetime'].isnull().sum())
+    print(df_add['datetime'].isnull().sum())
+
     # Merge the datasets using datetime as the key
     matched_df = pd.merge_asof(
         smc_df,
@@ -131,11 +136,17 @@ def run_etl(config, engine, connection, target_table):
    
    
     def get_component_id(dt):
-        for _, row in prod_data.iterrows():
+        # Extract the date from the timestamp
+        current_date = dt.date()
+    
+        # Filter prod_data for only that date
+        day_data = prod_data[prod_data['date'].dt.date == current_date]
+    
+        for _, row in day_data.iterrows():
             start = row['StartTime']
             end = row['EndTime']
     
-            # Shift that crosses midnight but is still part of the same foundry day
+            # Handle midnight crossing
             if end < start:
                 if dt >= start or dt <= end:
                     return row['component_id']
@@ -143,6 +154,7 @@ def run_etl(config, engine, connection, target_table):
                 if start <= dt <= end:
                     return row['component_id']
         return None
+ 
 
     matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
     matched_df['mixer_name'] = config['Mixer Name']
@@ -209,7 +221,7 @@ if __name__ == "__main__":
     cd = os.getcwd()
     config_dir = os.path.join(cd, "config")
     config_file_path = os.path.join(config_dir, "config.json")
-    
+
     # Load configuration
     with open(config_file_path, "r") as config_file:
         config = json.load(config_file)
@@ -262,7 +274,7 @@ if __name__ == "__main__":
                 else:
                     print("No new data to insert. ETL skipped.")
             except Exception as e:
-                print("ETL failed:", e)
+                print(f"ETL failed: {e}")
                 import traceback
                 traceback.print_exc()
     
