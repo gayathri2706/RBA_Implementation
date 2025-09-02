@@ -47,8 +47,8 @@ def smc_data_processing_rba(smc_df, config):
     print(smc_df.dtypes)
     smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
     smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
-    smc_df = smc_df.sort_values('datetime')
-
+    smc_df = smc_df.sort_values('datetime').reset_index(drop=True)
+    print(smc_df['datetime'].isnull().sum())
     print(smc_df.head(5))
 
 
@@ -119,8 +119,9 @@ def get_config():
     return config
 
 
-def get_additive_raw_data(line_id, config, connection):
-    df_add = pd.read_sql("SELECT * FROM additive_data_v2", connection)
+def get_additive_raw_data(line_id, config, date, connection):
+    df_add = pd.read_sql("SELECT * FROM additive_data_v2 where datetime>=%s", connection, params=[date])
+    df_add["datetime"] = pd.to_datetime(df_add["datetime"], errors="coerce")
 
     df_add = date_adjust(df_add, "datetime", True, config)
 
@@ -140,7 +141,9 @@ def get_additive_raw_data(line_id, config, connection):
     column_renaming = config["columns_to_rename"]
     df_add.rename(columns=column_renaming, inplace=True)
     print("Renamed columns:", df_add.columns.tolist())
-    df_add = df_add.sort_values('datetime')
+    #df_add = df_add.sort_values('datetime')
+    df_add = df_add.sort_values('datetime').reset_index(drop=True)
+    print(df_add['datetime'].isnull().sum())
     print(df_add.head(5))
     return df_add
 
@@ -238,9 +241,9 @@ def run_rba_etl(line_id, from_date, to_date):
         response['latest_timestamp'] = latest_timestamp
         response['additive_data'] = df.to_dict(orient='records')
     except Exception as e:
-        app.logger.error("ETL failed:", e)
+        app.logger.error(f"ETL failed: {e}")
         response["status"] = 500
-        response["message"] = "ETL failed: " + e
+        response["message"] = f"ETL failed:  {e}"
         traceback.print_exc()
     finally:
         if connection is not None:
@@ -254,7 +257,7 @@ def run_rba_etl(line_id, from_date, to_date):
 def process_rba_additive_etl(line_id, from_date, to_date, connection):
     config = get_config()
 
-    df_add = get_additive_raw_data(line_id, config, connection)
+    df_add = get_additive_raw_data(line_id, config, from_date, connection)
     smc_df = get_smc_data(line_id, from_date, to_date, config)
     smc_data_processing_rba(smc_df, config)
     prod_data = get_consumption_bookings(line_id, from_date, to_date)
@@ -282,20 +285,24 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
     prod_data['EndTime'] = prod_data.apply(lambda row: datetime.combine(row['date'], row['end_time']), axis=1)
     #prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
 
-
     def get_component_id(dt):
-        for _, row in prod_data.iterrows():
+        # Extract the date from the timestamp
+        current_date = dt.date()
+
+        # Filter prod_data for only that date
+        day_data = prod_data[prod_data['date'].dt.date == current_date]
+
+        for _, row in day_data.iterrows():
             start = row['StartTime']
             end = row['EndTime']
 
-            # Shift that crosses midnight but is still part of the same foundry day
+            # Handle midnight crossing
             if end < start:
                 if dt >= start or dt <= end:
                     return row['component_id']
             else:
                 if start <= dt <= end:
                     return row['component_id']
-
         return None
 
     # Apply the component lookup function
