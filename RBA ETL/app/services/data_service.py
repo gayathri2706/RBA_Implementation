@@ -21,7 +21,8 @@ from ..errors.exceptions import SandmanError
 
 from etl import get_last_processed_timestamp
 
-def get_smc_data(line_id, from_date, to_date, config):
+def get_smc_data(line_id, from_date, to_date):
+    app.logger.info(f'date range: {from_date} - {to_date}')
     cond = and_(SMCData.foundry_line_id == line_id, SMCData.date >= from_date,
                 SMCData.date <= to_date)
     qry = global_thread_local.SESSION.query(SMCData).filter(cond)
@@ -33,7 +34,6 @@ def get_smc_data(line_id, from_date, to_date, config):
     smc_df = pd.DataFrame([obj.__dict__ for obj in smc_data])
     smc_df.drop(['_sa_instance_state'], axis=1, inplace=True)
 
-    print(smc_df.dtypes)
     return smc_df
 
 
@@ -120,8 +120,17 @@ def get_config():
 
 
 def get_additive_raw_data(line_id, config, date, connection):
-    df_add = pd.read_sql("SELECT * FROM additive_data_v2 where datetime>=%s", connection, params=[date])
+    start_time = date - timedelta(days=1)
+    #end_time = datetime.now()
+
+    df_add = pd.read_sql("SELECT * FROM additive_data_v2 WHERE datetime BETWEEN %s AND %s",
+        connection,
+        params=[start_time, date]
+    )
+
+    #df_add = pd.read_sql("SELECT * FROM additive_data_v2 where datetime>=%s", connection, params=[date])
     df_add["datetime"] = pd.to_datetime(df_add["datetime"], errors="coerce")
+    app.logger.info(f'additive data: {df_add.shape}')
 
     df_add = date_adjust(df_add, "datetime", True, config)
 
@@ -257,10 +266,13 @@ def run_rba_etl(line_id, from_date, to_date):
 def process_rba_additive_etl(line_id, from_date, to_date, connection):
     config = get_config()
 
+    prev_date = to_date - timedelta(days=1)
     df_add = get_additive_raw_data(line_id, config, from_date, connection)
-    smc_df = get_smc_data(line_id, from_date, to_date, config)
+    smc_df = get_smc_data(line_id, prev_date, to_date)
     smc_data_processing_rba(smc_df, config)
-    prod_data = get_consumption_bookings(line_id, from_date, to_date)
+    #sorting issue fixes due to prev day data
+    smc_df = smc_df.sort_values('datetime').reset_index(drop=True)
+    prod_data = get_consumption_bookings(line_id, prev_date, to_date)
 
     last_timestamp = get_last_processed_timestamp(connection)
     if last_timestamp:
