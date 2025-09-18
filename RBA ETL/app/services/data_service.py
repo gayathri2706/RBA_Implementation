@@ -561,7 +561,7 @@ def get_munjal_config():
 def run_munjal_etl(line_id, from_date, to_date):
     config = get_munjal_config()
 
-    smc_df = get_smc_data(line_id, from_date, to_date, config)
+    smc_df = get_smc_data(line_id, from_date, to_date)
 
     column_maps = {'date': 'Date', 'time': 'Time', 'shift': 'Shift',
                    "co_final_percentage" : "Compactability SMC (%)",
