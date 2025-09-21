@@ -561,7 +561,8 @@ def get_munjal_config():
 def run_munjal_etl(line_id, from_date, to_date):
     config = get_munjal_config()
 
-    smc_df = get_smc_data(line_id, from_date, to_date)
+    prev_date = to_date - timedelta(days=1)
+    smc_df = get_smc_data(line_id, prev_date, to_date)
 
     column_maps = {'date': 'Date', 'time': 'Time', 'shift': 'Shift',
                    "co_final_percentage" : "Compactability SMC (%)",
@@ -575,7 +576,7 @@ def run_munjal_etl(line_id, from_date, to_date):
                    }
     smc_df = smc_df.rename(columns=column_maps)
     smc_data_preprocessing_munjal(smc_df, config)
-    scada_df = get_scada_data(line_id, from_date, to_date, config)
+    scada_df = get_scada_data(line_id, prev_date, to_date, config)
 
     smc_df = smc_df.sort_values('Datetime')
     scada_df = scada_df.sort_values('Datetime')
