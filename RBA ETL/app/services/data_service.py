@@ -436,10 +436,13 @@ def insert_logger_entry(connection, timestamp):
 def run_etl(customer_id, line_id, from_date, to_date):
     response = None
     customer = read_customer(customer_id)
+    app.logger.info(f'customer: {customer.name}')
     if 'munjal' in customer.name.lower() and 'kiriu' in customer.name.lower():
         response = run_munjal_etl(line_id, from_date, to_date)
     elif 'rba' in customer.name.lower():
         response = run_rba_etl(line_id, from_date, to_date)
+    elif 'mcie' in customer.name.lower():
+        response = run_mcie_etl(line_id, from_date, to_date)
     else:
         app.logger.error("Additive ETL is not enabled for customer: " + customer.name)
 
@@ -661,3 +664,252 @@ def run_munjal_etl(line_id, from_date, to_date):
     response['additive_data'] = df.to_dict(orient='records')
 
     return  response
+
+
+def run_mcie_etl(line_id, from_date, to_date):
+    response = dict()
+    connection = None
+
+    try:
+        line = get_foundry_line(line_id)
+        scada_db_props = json.loads(line.scada_db_properties_json)
+        print(scada_db_props)
+
+        # Database connection parameters
+        # db_config = scada_db_props["dbName"]
+        DB_USER = scada_db_props["username"]
+        DB_PASSWORD = scada_db_props["password"]
+        DB_HOST = scada_db_props["host"]
+        DB_PORT = scada_db_props["port"]
+        DB_NAME = scada_db_props["dbName"]
+
+        # Create a direct pymysql connection for more efficient execution and transactions
+        connection = pymysql.connect(
+            host=DB_HOST,
+            port=int(DB_PORT),
+            user=DB_USER,
+            password=DB_PASSWORD,
+            database=DB_NAME,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+
+        df, latest_timestamp = process_mcie_dditive_etl(line_id, from_date, to_date, connection)
+
+        column_mapping = {
+            "timestamp": "timeStamp",
+            "date": "date",
+            "shift": "shift",
+            "mixer_name": "mixerName",
+            "batch_counter": "batchCounter",
+            "component_id": "componentId",
+            "recycle_sand_set_point": "recycleSandSetPoint",
+            "recycle_sand_actual": "recycleSandActual",
+            "bentonite_set_point": "bentoniteSetPoint",
+            "bentonite_actual": "bentoniteActual",
+            "coal_dust_set_point": "coalDustSetPoint",
+            "coal_dust_actual": "coalDustActual",
+            "fss_set_point": "fssSetPoint",
+            "fss_actual": "fssActual",
+            "water_set_point": "waterSetPoint",
+            "water_actual": "waterActual",
+            "inert_fines_set_point": "inertFinesSetPoint",
+            "inert_fines_actual": "inertFinesActual",
+            "compactability_smc_pct": "compactabilitySmcPct",
+            "cosp_percentage_pct": "cospPercentagePct",
+            "temperature_c": "temperatureC",
+            "total_seconds": "totalSeconds",
+            "total_water_ltr": "totalWaterLtr",
+            "moisture_smc_pct": "moistureSmcPct",
+            "wd1_ltr": "wd1Ltr",
+            "co1_pct": "co1Pct"
+        }
+        df = df.rename(columns=column_mapping)
+        df["time"] = df["time"].apply(lambda x: x.isoformat() if pd.notnull(x) else None)
+
+        response["status"] = 200
+        response["message"] = "success"
+        response['latest_timestamp'] = latest_timestamp
+        response['additive_data'] = df.to_dict(orient='records')
+    except Exception as e:
+        app.logger.error(f"ETL failed: {e}")
+        response["status"] = 500
+        response["message"] = f"ETL failed:  {e}"
+        traceback.print_exc()
+    finally:
+        if connection is not None:
+            connection.close()
+            app.logger.info("Database connection closed.")
+
+    return response
+
+
+def process_mcie_dditive_etl(line_id, from_date, to_date, connection):
+    app.logger.info("Invoking MCIE Additive ETL!!")
+    last_timestamp = get_last_processed_timestamp(connection)
+    if last_timestamp:
+        app.logger.info(f"Last processed timestamp: {last_timestamp}")
+    else:
+        app.logger.info("First run or no timestamp found in logger.")
+
+    config = get_mcie_config()
+
+    prev_date = to_date - timedelta(days=1)
+    smc_df = get_smc_data(line_id, prev_date, to_date)
+
+    '''
+    column_maps = {'date': 'Date', 'time': 'Time', 'shift': 'Shift',
+                   "co_final_percentage": "Compactability SMC (%)",
+                   "cosp_percent": "COSP Percentage (%)",
+                   "temp_st1c": "Temperature (C)",
+                   "total_seconds": "Total Seconds (seconds)",
+                   "total_water": "Total Water (ltr)",
+                   "moisture_percentage": "Moisture SMC (%)",
+                   "wd1": "WD1 (ltr)",
+                   "co1": "CO1 (%)"
+                   }
+    smc_df = smc_df.rename(columns=column_maps)
+    '''
+
+    df_add = get_scada_raw_data(from_date, config, connection)
+
+    prod_data = get_consumption_bookings(line_id, prev_date, to_date)
+
+    smc_df = smc_data_preprocessing_mcie(smc_df, config)
+    smc_df = smc_df.sort_values('datetime')
+    df_add = df_add.sort_values('datetime')
+
+    matched_df = pd.merge_asof(
+        smc_df,
+        df_add,
+        on='datetime',
+        direction='nearest',
+    )
+
+    matched_df = matched_df.sort_values(['date', 'time'])
+
+    # Process product data for component lookup
+    prod_data['StartTime'] = pd.to_datetime(prod_data['date'].astype(str) + " " + prod_data['start_time'].astype(str))
+    prod_data['EndTime'] = pd.to_datetime(prod_data['date'].astype(str) + " " + prod_data['end_time'].astype(str))
+    #prod_data['StartTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['start_time']))
+    #prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
+
+    def get_component_id_mcie(dt):
+        for _, row in prod_data.iterrows():
+            start = row['StartTime']
+            end = row['EndTime']
+
+            # Shift that crosses midnight but is still part of the same foundry day
+            if end < start:
+                if dt >= start or dt <= end:
+                    return row['component_id']
+            else:
+                if start <= dt <= end:
+                    return row['component_id']
+        return None
+
+    matched_df['component_id'] = matched_df['datetime'].apply(get_component_id_mcie)
+    matched_df['mixer_name'] = config['Mixer Name']
+
+    df = matched_df[config["columns_to_select"]]
+
+    df['date'] = pd.to_datetime(df['date'])
+    df['time'] = pd.to_timedelta(df['time'].astype(str)).apply(lambda x: (datetime.min + x).time())
+
+    df['timestamp'] = df.apply(compute_actual_datetime, axis=1)
+    df['date'] = df['date'].dt.date
+
+    df = df.sort_values(by=['timestamp'])
+
+    # Rename columns to match the target database schema
+    output_columns = config["output_columns"].copy()
+
+    # Ensure timestamp is included in output columns mapping
+    if 'timestamp' not in output_columns:
+        output_columns['timestamp'] = 'timestamp'
+
+    # Apply column renaming
+    df.rename(columns=output_columns, inplace=True)
+
+    float_cols = df.select_dtypes(include=['float64']).columns
+    df[float_cols] = df[float_cols].round(2)
+
+    # Show sample data
+    print("Sample of new data to be inserted:")
+    print(df.head())
+
+    # Filter out records that already exist in the database
+    if last_timestamp is not None:
+        new_records = df[df['timestamp'] > last_timestamp]
+        old_records = df[df['timestamp'] <= last_timestamp]
+        print(f"Total records: {len(df)}")
+        print(f"Records already in database: {len(old_records)}")
+        print(f"New records to insert: {len(new_records)}")
+        df = new_records
+
+    # If no new records, return empty dataframe with the latest timestamp
+    if len(df) == 0:
+        print("No new records to insert.")
+        return df, None
+
+    # Get the latest timestamp from the new records
+    latest_timestamp = df['timestamp'].max()
+
+    # Check column names match the target schema
+    print("Final columns for DB insert:", df.columns.tolist())
+    return df, latest_timestamp
+
+
+def get_mcie_config():
+    cd = os.getcwd()
+    print(cd)
+    config_dir = os.path.join(cd, "Config")
+    config_file_path = os.path.join(config_dir, "mcie_config.json")
+
+    # Load configuration
+    with open(config_file_path, "r") as config_file:
+        config = json.load(config_file)
+
+    return config
+
+
+def smc_data_preprocessing_mcie(smc_df, config):
+    smc_df['date'] = smc_df['date'].astype(str)
+    #smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
+    smc_df['datetime'] = pd.to_datetime(smc_df['date'].astype(str) + " " + smc_df['time'].astype(str))
+    smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
+    smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
+    smc_df = smc_df.sort_values('datetime')
+    return smc_df
+
+
+def get_scada_raw_data(date, config, connection):
+    start_time = date - timedelta(days=1)
+    #end_time = datetime.now()
+
+    df_add = pd.read_sql("SELECT * FROM scada_data WHERE DATE(datetime) BETWEEN %s AND %s",
+        connection,
+        params=[start_time, date]
+    )
+
+    df_add["datetime"] = pd.to_datetime(df_add["datetime"], errors="coerce")
+    app.logger.info(f'mcie sacad raw data: {df_add.shape}')
+
+    df_add = date_adjust(df_add, "datetime", True, config)
+
+    column_pairs = [
+        ('Bentonite_set_value', 'Bentonite_actual_value'),
+        ("return_sand_capacity_set", "return_sand_capacity_actual"),
+        ("Fines_set_value", "Fines_actual_value"),
+    ]
+
+    df_add = clean_actual_columns(df_add, column_pairs)
+
+    # Rename columns according to config
+    column_renaming = config["columns_to_rename"]
+    df_add.rename(columns=column_renaming, inplace=True)
+    print("Renamed columns:", df_add.columns.tolist())
+    # df_add = df_add.sort_values('datetime')
+    df_add = df_add.sort_values('datetime').reset_index(drop=True)
+    print(df_add['datetime'].isnull().sum())
+    print(df_add.head(5))
+    return df_add
