@@ -856,6 +856,19 @@ def process_mcie_dditive_etl(line_id, from_date, to_date, connection):
 
     # Check column names match the target schema
     print("Final columns for DB insert:", df.columns.tolist())
+
+    # Insert data to the correct table with timestamp column, but only if there are new records
+    if not df.empty:
+        print(f"Writing {len(df)} new records to table")
+
+        # Insert a new log entry with the latest timestamp
+        if latest_timestamp:
+            insert_logger_entry(connection, latest_timestamp)
+
+        print("MCIE ETL process completed successfully.")
+    else:
+        print("No new data to insert. MCIE ETL skipped.")
+
     return df, latest_timestamp
 
 
