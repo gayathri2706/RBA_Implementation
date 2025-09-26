@@ -756,27 +756,16 @@ def process_mcie_dditive_etl(line_id, from_date, to_date, connection):
     prev_date = to_date - timedelta(days=1)
     smc_df = get_smc_data(line_id, prev_date, to_date)
 
-    '''
-    column_maps = {'date': 'Date', 'time': 'Time', 'shift': 'Shift',
-                   "co_final_percentage": "Compactability SMC (%)",
-                   "cosp_percent": "COSP Percentage (%)",
-                   "temp_st1c": "Temperature (C)",
-                   "total_seconds": "Total Seconds (seconds)",
-                   "total_water": "Total Water (ltr)",
-                   "moisture_percentage": "Moisture SMC (%)",
-                   "wd1": "WD1 (ltr)",
-                   "co1": "CO1 (%)"
-                   }
-    smc_df = smc_df.rename(columns=column_maps)
-    '''
-
     df_add = get_scada_raw_data(from_date, config, connection)
 
     prod_data = get_consumption_bookings(line_id, prev_date, to_date)
 
     smc_df = smc_data_preprocessing_mcie(smc_df, config)
-    smc_df = smc_df.sort_values('datetime')
-    df_add = df_add.sort_values('datetime')
+    smc_df = smc_df.sort_values('datetime').reset_index(drop=True)
+    df_add = df_add.sort_values('datetime').reset_index(drop=True)
+
+    print(smc_df['datetime'].isnull().sum())
+    print(df_add['datetime'].isnull().sum())
 
     matched_df = pd.merge_asof(
         smc_df,
@@ -794,11 +783,17 @@ def process_mcie_dditive_etl(line_id, from_date, to_date, connection):
     #prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
 
     def get_component_id_mcie(dt):
-        for _, row in prod_data.iterrows():
+        # Extract the date from the timestamp
+        current_date = dt.date()
+
+        # Filter prod_data for only that date
+        day_data = prod_data[prod_data['date'].dt.date == current_date]
+
+        for _, row in day_data.iterrows():
             start = row['StartTime']
             end = row['EndTime']
 
-            # Shift that crosses midnight but is still part of the same foundry day
+            # Handle midnight crossing
             if end < start:
                 if dt >= start or dt <= end:
                     return row['component_id']
@@ -809,13 +804,13 @@ def process_mcie_dditive_etl(line_id, from_date, to_date, connection):
 
     matched_df['component_id'] = matched_df['datetime'].apply(get_component_id_mcie)
     matched_df['mixer_name'] = config['Mixer Name']
-
+    matched_df['water_actual'] = matched_df['total_water']
     df = matched_df[config["columns_to_select"]]
 
     df['date'] = pd.to_datetime(df['date'])
     df['time'] = pd.to_timedelta(df['time'].astype(str)).apply(lambda x: (datetime.min + x).time())
 
-    df['timestamp'] = df.apply(compute_actual_datetime, axis=1)
+    df['timestamp'] = df.apply(compute_actual_datetime_mcie, axis=1)
     df['date'] = df['date'].dt.date
 
     df = df.sort_values(by=['timestamp'])
@@ -885,13 +880,25 @@ def get_mcie_config():
     return config
 
 
+def compute_actual_datetime_mcie(row):
+    base_date = row['date']
+    time = row['time']
+    shift = row['shift']
+    base_datetime = datetime.combine(base_date, time)
+
+    # Only shift date forward for early morning times
+    if shift == 'C' and time < datetime.strptime("07:00", "%H:%M").time() and time < datetime.strptime("23:00", "%H:%M").time():
+        return base_datetime + timedelta(days=1)
+    else:
+        return base_datetime
+
+
 def smc_data_preprocessing_mcie(smc_df, config):
     smc_df['date'] = smc_df['date'].astype(str)
     #smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
     smc_df['datetime'] = pd.to_datetime(smc_df['date'].astype(str) + " " + smc_df['time'].astype(str))
     smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
     smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
-    smc_df = smc_df.sort_values('datetime')
     return smc_df
 
 
@@ -913,6 +920,7 @@ def get_scada_raw_data(date, config, connection):
         ('Bentonite_set_value', 'Bentonite_actual_value'),
         ("return_sand_capacity_set", "return_sand_capacity_actual"),
         ("Fines_set_value", "Fines_actual_value"),
+        ("coal_dust_set_value", "coal_dust_actual_value")
     ]
 
     df_add = clean_actual_columns(df_add, column_pairs)
