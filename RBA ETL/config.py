@@ -29,5 +29,6 @@ class StgConfig(Base):
 
 class ProductionConfig(Base):
     DEBUG = False
-    DATABASE_URI = "mysql+mysqlconnector://root:%23%24%40ndm%40Ndb_2020%26@sandman-mysql/sandman_dev"
-    DOC_MYSQL = "sandman-mysql"
+    DATABASE_URI = "mysql+mysqlconnector://admin:$anDman!2025&@sandman.cjmg6ek4cf9c.ap-south-1.rds.amazonaws.com:43306/sandman_dev"
+    #DATABASE_URI = "mysql+mysqlconnector://root:%23%24%40ndm%40Ndb_2020%26@sandman-mysql/sandman_dev"
+    #DOC_MYSQL = "sandman-mysql"
