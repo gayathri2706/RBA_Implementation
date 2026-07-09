@@ -121,11 +121,12 @@ def get_config():
 
 def get_additive_raw_data(line_id, config, date, connection):
     start_time = date - timedelta(days=1)
+    end_time = date + timedelta(days=1)
     #end_time = datetime.now()
 
     df_add = pd.read_sql("SELECT * FROM additive_data_v2 WHERE datetime BETWEEN %s AND %s",
         connection,
-        params=[start_time, date]
+        params=[start_time, end_time]
     )
 
     #df_add = pd.read_sql("SELECT * FROM additive_data_v2 where datetime>=%s", connection, params=[date])
