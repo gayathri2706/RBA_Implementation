@@ -133,7 +133,7 @@ def get_additive_raw_data(line_id, config, date, connection):
     df_add["datetime"] = pd.to_datetime(df_add["datetime"], errors="coerce")
     app.logger.info(f'additive data: {df_add.shape}')
 
-    df_add = date_adjust(df_add, "datetime", True, config)
+    #df_add = date_adjust(df_add, "datetime", True, config)
 
     # Define column pairs for cleaning
     column_pairs = [
@@ -298,6 +298,7 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
     prod_data['EndTime'] = prod_data.apply(lambda row: datetime.combine(row['date'], row['end_time']), axis=1)
     #prod_data['EndTime'] = pd.to_datetime(prod_data['date'] + pd.to_timedelta(prod_data['end_time']))
 
+    '''
     def get_component_id(dt):
         # Extract the date from the timestamp
         current_date = dt.date()
@@ -317,10 +318,77 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
                 if start <= dt <= end:
                     return row['component_id']
         return None
+    '''
+
+    def get_component_id(dt, prod_data, tolerance_minutes=45, debug=False):
+        """
+        Returns the ComponentId for datetime `dt` from prod_data (already in foundry time).
+        - Exact match wins.
+        - If dt lies between components, prefer *previous* component (never the next one).
+        - Tolerance only applies backward (after end time).
+        """
+        if pd.isna(dt):
+            return None
+
+        dt = pd.to_datetime(dt, errors='coerce')
+        if pd.isna(dt):
+            return None
+
+        df = prod_data.copy()
+        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce')
+        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce')
+
+        nearest_component = None
+        min_diff_seconds = float('inf')
+
+        for _, row in df.iterrows():
+            comp = row.get('ComponentId', None)
+            if comp is None:
+                continue
+
+            start = row['StartTime']
+            end = row['EndTime']
+            if pd.isna(start) or pd.isna(end):
+                continue
+
+            # Handle intervals crossing midnight
+            if end < start:
+                end += timedelta(days=1)
+
+            # --- Exact match ---
+            if start <= dt <= end:
+                if debug:
+                    print(f" Exact match: {comp} ({start.time()} - {end.time()})")
+                return comp
+
+            # --- If dt is after end (backward tolerance) ---
+            if dt > end:
+                diff = (dt - end).total_seconds()
+                if diff <= tolerance_minutes * 60 and diff < min_diff_seconds:
+                    nearest_component = comp
+                    min_diff_seconds = diff
+                    if debug:
+                        print(f"⬅️  Using previous component {comp}, diff={diff / 60:.1f} min")
+
+            # --- If dt < start (future interval) ---
+            # Skip — foundry rule: do not pick future component before it starts
+            elif dt < start:
+                continue
+
+        if debug:
+            if nearest_component:
+                print(f"Final chosen component: {nearest_component}")
+            else:
+                print("No component found within tolerance")
+
+        return nearest_component
 
     # Apply the component lookup function
     print("Matching components to time ranges...")
-    matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
+    #matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
+    matched_df['Component ID'] = matched_df['Datetime'].apply(
+        lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30)
+    )
     matched_df['mixer_name'] = config['Mixer Name']
 
     # Select only the needed columns
