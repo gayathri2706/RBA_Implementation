@@ -386,7 +386,7 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
     # Apply the component lookup function
     print("Matching components to time ranges...")
     #matched_df['component_id'] = matched_df['datetime'].apply(get_component_id)
-    matched_df['Component ID'] = matched_df['Datetime'].apply(
+    matched_df['component_id'] = matched_df['datetime'].apply(
         lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30)
     )
     matched_df['mixer_name'] = config['Mixer Name']
