@@ -155,74 +155,73 @@ def run_etl(config, engine, connection, target_table):
     #                 return row['component_id']
     #     return None
     def get_component_id(dt, prod_data, tolerance_minutes=45, debug=False):
-    """
-    Returns the ComponentId for datetime `dt` from prod_data (already in foundry time).
-    - Exact match wins.
-    - If dt lies between components, prefer *previous* component (never the next one).
-    - Tolerance only applies backward (after end time).
-    """
-    if pd.isna(dt):
-        return None
+        """
+        Returns the ComponentId for datetime `dt` from prod_data (already in foundry time).
+        - Exact match wins.
+        - If dt lies between components, prefer *previous* component (never the next one).
+        - Tolerance only applies backward (after end time).
+        """
+        if pd.isna(dt):
+            return None
 
-    dt = pd.to_datetime(dt, errors='coerce')
-    if pd.isna(dt):
-        return None
+        dt = pd.to_datetime(dt, errors='coerce')
+        if pd.isna(dt):
+            return None
 
-    df = prod_data.copy()
-    df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce')
-    df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce')
+        df = prod_data.copy()
+        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce')
+        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce')
 
-    nearest_component = None
-    min_diff_seconds = float('inf')
+        nearest_component = None
+        min_diff_seconds = float('inf')
 
-    for _, row in df.iterrows():
-        comp = row.get('ComponentId', None)
-        if comp is None:
-            continue
+        for _, row in df.iterrows():
+            comp = row.get('component_id', None)
+            if comp is None:
+                continue
 
-        start = row['StartTime']
-        end = row['EndTime']
-        if pd.isna(start) or pd.isna(end):
-            continue
+            start = row['StartTime']
+            end = row['EndTime']
+            if pd.isna(start) or pd.isna(end):
+                continue
 
-        # Handle intervals crossing midnight
-        if end < start:
-            end += timedelta(days=1)
+            # Handle intervals crossing midnight
+            if end < start:
+                end += timedelta(days=1)
 
-        # --- Exact match ---
-        if start <= dt <= end:
-            if debug:
-                print(f" Exact match: {comp} ({start.time()} - {end.time()})")
-            return comp
-
-        # --- If dt is after end (backward tolerance) ---
-        if dt > end:
-            diff = (dt - end).total_seconds()
-            if diff <= tolerance_minutes * 60 and diff < min_diff_seconds:
-                nearest_component = comp
-                min_diff_seconds = diff
+            # --- Exact match ---
+            if start <= dt <= end:
                 if debug:
-                    print(f"⬅️  Using previous component {comp}, diff={diff/60:.1f} min")
+                    print(f" Exact match: {comp} ({start.time()} - {end.time()})")
+                return comp
 
-        # --- If dt < start (future interval) ---
-        # Skip — foundry rule: do not pick future component before it starts
-        elif dt < start:
-            continue
+            # --- If dt is after end (backward tolerance) ---
+            if dt > end:
+                diff = (dt - end).total_seconds()
+                if diff <= tolerance_minutes * 60 and diff < min_diff_seconds:
+                    nearest_component = comp
+                    min_diff_seconds = diff
+                    if debug:
+                        print(f"⬅️  Using previous component {comp}, diff={diff/60:.1f} min")
 
-    if debug:
-        if nearest_component:
-            print(f"Final chosen component: {nearest_component}")
-        else:
-            print("No component found within tolerance")
+            # --- If dt < start (future interval) ---
+            # Skip — foundry rule: do not pick future component before it starts
+            elif dt < start:
+                continue
 
-    return nearest_component
- 
+        if debug:
+            if nearest_component:
+                print(f"Final chosen component: {nearest_component}")
+            else:
+                print("No component found within tolerance")
+
+        return nearest_component
 
     # matched_df['component_id'] = matched_df['datetime'].apply(get_component_id,tolerance_minutes=45)
- 
-    matched_df['Component ID'] = matched_df['Datetime'].apply(
-    lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30)
-     )
+
+    matched_df['Component ID'] = matched_df['datetime'].apply(
+        lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30)
+    )
     matched_df['mixer_name'] = config['Mixer Name']
    
     df = matched_df[config["columns_to_select"]]
