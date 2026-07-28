@@ -30,6 +30,7 @@ sql_file_path = config["sql_file_path"]
 data_frequency = config["data_frequency"]
 
 LAST_SENT_START_TIME = None  # 🔁 Initialize this global variable
+LAST_SENT_END_TIME = None
 
 
 API_URL = config["api_url"]
@@ -435,7 +436,7 @@ def send_data_to_api(json_data):
     except Exception as e:
         print(f" Unexpected error: {e}")  #  Print error details
 
-def handle_api_update(df_id, latest_record, LAST_SENT_START_TIME):
+def handle_api_update(df_id, latest_record, LAST_SENT_START_TIME, LAST_SENT_END_TIME):
     latest_start_time = latest_record['startTime']
     latest_end_time = latest_record['endTime']
     prev_record = df_id.iloc[-2] if len(df_id) > 1 else None
@@ -445,37 +446,32 @@ def handle_api_update(df_id, latest_record, LAST_SENT_START_TIME):
         print("🔄 First run: Sending initial data to API.")
         json_data = clean_json_data(df_id)
         send_data_to_api(json_data)
-        return latest_start_time
+        return latest_start_time, latest_end_time
 
     # Case 2: StartTime is same
     elif LAST_SENT_START_TIME == latest_start_time:
-        if prev_record is not None and latest_end_time != prev_record['endTime']:
+        if latest_end_time != LAST_SENT_END_TIME:
             print(f"🆕 EndTime changed for same StartTime = {latest_start_time}. Overwriting latest record.")
             json_data = clean_json_data(latest_record.to_frame().T)
             send_data_to_api(json_data)
         else:
             print("✅ No change in StartTime or EndTime. Skipping API update.")
-        return LAST_SENT_START_TIME
+        return latest_start_time, latest_end_time
 
     # Case 3: StartTime changed
     else:
         print(f"🆕 StartTime changed from {LAST_SENT_START_TIME} ➝ {latest_start_time}")
 
-        if prev_record is not None:
-            json_prev = clean_json_data(prev_record.to_frame().T)
-            print(f"✏️ Overwriting previous record: StartTime = {prev_record['startTime']}")
-            send_data_to_api(json_prev)
-
         json_latest = clean_json_data(latest_record.to_frame().T)
         print(f"➕ Inserting new record: StartTime = {latest_start_time}")
         send_data_to_api(json_latest)
 
-        return latest_start_time
+        return latest_start_time, latest_end_time
 
 
 #  Process data
 def process_data():
-    global LAST_SENT_START_TIME      
+    global LAST_SENT_START_TIME, LAST_SENT_END_TIME
     df_id = fetch_mould_data()
     df_hid = fetch_pattern_components()
 
@@ -554,7 +550,9 @@ def process_data():
     latest_record = df_id.iloc[-1]
 
     # ✅ Call the new handler here
-    LAST_SENT_START_TIME = handle_api_update(df_id, latest_record, LAST_SENT_START_TIME)
+    LAST_SENT_START_TIME, LAST_SENT_END_TIME = handle_api_update(
+        df_id, latest_record, LAST_SENT_START_TIME, LAST_SENT_END_TIME
+    )
 
     print(f"📌 Updated Reference: Production Date = {latest_record['date']}, Start Time = {latest_record['startTime']}")
 
