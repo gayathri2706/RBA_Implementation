@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.xlsx
+*.json
+!Config/config.json
+err.txt
+out.txt
+output.json
+test.py
+data/
