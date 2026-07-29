@@ -133,7 +133,7 @@ def get_additive_raw_data(line_id, config, date, connection):
     df_add["datetime"] = pd.to_datetime(df_add["datetime"], errors="coerce")
     app.logger.info(f'additive data: {df_add.shape}')
 
-    #df_add = date_adjust(df_add, "datetime", True, config)
+    df_add = date_adjust(df_add, "datetime", True, config)
 
     # Define column pairs for cleaning
     column_pairs = [
@@ -342,7 +342,7 @@ def process_rba_additive_etl(line_id, from_date, to_date, connection):
         min_diff_seconds = float('inf')
 
         for _, row in df.iterrows():
-            comp = row.get('ComponentId', None)
+            comp = row.get('component_id', None)
             if comp is None:
                 continue
 
