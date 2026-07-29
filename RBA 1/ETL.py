@@ -29,8 +29,6 @@ db_config = config["database"]
 sql_file_path = config["sql_file_path"]
 data_frequency = config["data_frequency"]
 
-LAST_SENT_START_TIME = None  # 🔁 Initialize this global variable
-LAST_SENT_END_TIME = None
 
 
 API_URL = config["api_url"]
@@ -401,76 +399,55 @@ def clean_json_data(df):
 
     return df.to_dict(orient="records")  # ✅ Return as a dictionary, not JSON string
 
+#  Persistent session — login once for the life of the process, not per request
+session = requests.Session()
+_logged_in = False
+
+def login():
+    global _logged_in
+    login_payload = {"j_username": USERNAME, "j_password": PASSWORD}
+    login_response = session.post(LOGIN_URL, data=login_payload)
+    if login_response.status_code == 200:
+        print(" Login successful!")
+        _logged_in = True
+    else:
+        print(f" Login failed! Status Code: {login_response.status_code}, Response: {login_response.text}")
+        _logged_in = False
+    return _logged_in
+
 def send_data_to_api(json_data):
+    global _logged_in
     try:
         # ✅ Debug: Print JSON before sending
         print("📤 JSON Payload Being Sent:\n", json.dumps(json_data, indent=4))
 
-        # ✅ Login to API
-        session = requests.Session()
-        login_payload = {"j_username": USERNAME, "j_password": PASSWORD}
-        login_response = session.post(LOGIN_URL, data=login_payload)
-
-        if login_response.status_code == 200:
-            print(" Login successful!")
-
-            #  Extract cookies
-            cookies = session.cookies.get_dict()
-            print(" Cookies received:", cookies)
-
-            #  Send POST request with correctly formatted JSON
-            headers = {
-                "Content-Type": "application/json",
-                "Cookie": f"JSESSIONID={cookies.get('JSESSIONID', '')}"
-            }
-
-            # Send JSON properly
-            response = session.post(API_URL, json=json_data, headers=headers)  #  FIXED
-
-            #  Print API response
-            print(" Response Status Code:", response.status_code)
-            print(" Response Body:", response.text)
-        else:
-            print(f" Login failed! Status Code: {login_response.status_code}, Response: {login_response.text}")
+        if not _logged_in and not login():
             return
+
+        headers = {"Content-Type": "application/json"}
+        response = session.post(API_URL, json=json_data, headers=headers)
+
+        #  Session may have expired between cycles — re-authenticate once and retry
+        if response.status_code in (401, 403):
+            print(" Session expired. Re-authenticating and retrying once.")
+            if login():
+                response = session.post(API_URL, json=json_data, headers=headers)
+
+        #  Print API response
+        print(" Response Status Code:", response.status_code)
+        print(" Response Body:", response.text)
     except Exception as e:
         print(f" Unexpected error: {e}")  #  Print error details
 
-def handle_api_update(df_id, latest_record, LAST_SENT_START_TIME, LAST_SENT_END_TIME):
-    latest_start_time = latest_record['startTime']
-    latest_end_time = latest_record['endTime']
-
-    # Case 1: First run
-    if LAST_SENT_START_TIME is None:
-        print("🔄 First run: Sending initial data to API.")
-        json_data = clean_json_data(df_id)
-        send_data_to_api(json_data)
-        return latest_start_time, latest_end_time
-
-    # Case 2: StartTime is same
-    elif LAST_SENT_START_TIME == latest_start_time:
-        if latest_end_time != LAST_SENT_END_TIME:
-            print(f"🆕 EndTime changed for same StartTime = {latest_start_time}. Overwriting latest record.")
-            json_data = clean_json_data(latest_record.to_frame().T)
-            send_data_to_api(json_data)
-        else:
-            print("✅ No change in StartTime or EndTime. Skipping API update.")
-        return latest_start_time, latest_end_time
-
-    # Case 3: StartTime changed
-    else:
-        print(f"🆕 StartTime changed from {LAST_SENT_START_TIME} ➝ {latest_start_time}")
-
-        json_latest = clean_json_data(latest_record.to_frame().T)
-        print(f"➕ Inserting new record: StartTime = {latest_start_time}")
-        send_data_to_api(json_latest)
-
-        return latest_start_time, latest_end_time
+def handle_api_update(df_id):
+    """Send every record the query returned this cycle, in a single request/single login."""
+    print(f"📤 Sending all {len(df_id)} record(s) returned by the query in one request.")
+    json_data = clean_json_data(df_id)
+    send_data_to_api(json_data)
 
 
 #  Process data
 def process_data():
-    global LAST_SENT_START_TIME, LAST_SENT_END_TIME
     df_id = fetch_mould_data()
     df_hid = fetch_pattern_components()
 
@@ -545,15 +522,10 @@ def process_data():
 
     df_id['unpouredMould']=df_id['unpouredMould'].astype(float)
 
-    # ✅ Process only the latest record
-    latest_record = df_id.iloc[-1]
+    # ✅ Send every record the query returned, in one request
+    handle_api_update(df_id)
 
-    # ✅ Call the new handler here
-    LAST_SENT_START_TIME, LAST_SENT_END_TIME = handle_api_update(
-        df_id, latest_record, LAST_SENT_START_TIME, LAST_SENT_END_TIME
-    )
-
-    print(f"📌 Updated Reference: Production Date = {latest_record['date']}, Start Time = {latest_record['startTime']}")
+    print(f"📌 Cycle complete: {len(df_id)} record(s) sent.")
 
 
 #  Run the process every `data_frequency` minutes
