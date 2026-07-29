@@ -18,8 +18,8 @@
         "database_name": "rba_data"
         },
         "pat_database": {
-            "host": "localhost",
-            "port": "33306",
+            "host": "sandman.co.in",
+            "port": "43306",
             "user": "rba",
             "password": "#$@ndm@Ndb_2020&",
             "database_name": "rba_sandman"
@@ -32,5 +32,4 @@
         "j_password": "!!Rba@2026"
 
     }
-
 
