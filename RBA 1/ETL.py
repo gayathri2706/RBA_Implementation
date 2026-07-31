@@ -402,18 +402,25 @@ def clean_json_data(df):
 #  Persistent session — login once for the life of the process, not per request
 session = requests.Session()
 _logged_in = False
+_jsessionid = None
 
 def login():
-    global _logged_in
+    global _logged_in, _jsessionid
     login_payload = {"j_username": USERNAME, "j_password": PASSWORD}
     login_response = session.post(LOGIN_URL, data=login_payload)
-    if login_response.status_code == 200:
+    _jsessionid = session.cookies.get("JSESSIONID")
+    if login_response.status_code == 200 and _jsessionid:
         print(" Login successful!")
         _logged_in = True
     else:
         print(f" Login failed! Status Code: {login_response.status_code}, Response: {login_response.text}")
         _logged_in = False
     return _logged_in
+
+def _looks_unauthenticated(response_text):
+    # Spring Security serves the login/home page (HTTP 200, not 401/403) when the
+    # session isn't actually authenticated — detect that instead of trusting status_code.
+    return "<html" in response_text[:500].lower()
 
 def send_data_to_api(json_data):
     global _logged_in
@@ -424,14 +431,22 @@ def send_data_to_api(json_data):
         if not _logged_in and not login():
             return
 
-        headers = {"Content-Type": "application/json"}
-        response = session.post(API_URL, json=json_data, headers=headers)
+        def _post_once():
+            headers = {
+                "Content-Type": "application/json",
+                # Force the session cookie regardless of the cookie's Path scoping —
+                # requests' automatic cookie jar can silently drop it otherwise.
+                "Cookie": f"JSESSIONID={_jsessionid}"
+            }
+            return session.post(API_URL, json=json_data, headers=headers)
 
-        #  Session may have expired between cycles — re-authenticate once and retry
-        if response.status_code in (401, 403):
-            print(" Session expired. Re-authenticating and retrying once.")
+        response = _post_once()
+
+        #  Re-authenticate once if the session turned out to not be authenticated
+        if response.status_code in (401, 403) or _looks_unauthenticated(response.text):
+            print(" Session not authenticated. Re-authenticating and retrying once.")
             if login():
-                response = session.post(API_URL, json=json_data, headers=headers)
+                response = _post_once()
 
         #  Print API response
         print(" Response Status Code:", response.status_code)
