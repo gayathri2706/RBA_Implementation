@@ -104,12 +104,31 @@ def run_etl(config, engine, connection, target_table):
     df_add.rename(columns=column_renaming, inplace=True)
     print("Renamed columns:", df_add.columns.tolist())
  
-    def smc_data_preprocessing(smc_df):
-        smc_df['date'] = smc_df['date'].astype(str)
-        smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
+    # def smc_data_preprocessing(smc_df):
+    #     smc_df['date'] = smc_df['date'].astype(str)
+    #     smc_df['datetime'] = pd.to_datetime(smc_df['date']) + pd.to_timedelta(smc_df['time'])
+    #     smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
+    #     smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
+    #     return smc_df
+ 
+    def smc_data_preprocessing(smc_df, config):
+
+        smc_df['datetime'] = smc_df.apply(
+            lambda row: datetime.combine(row['date'], row['time']),
+            axis=1
+        )
+
+        shift_cutoff_str = config["shift_time"]["A"][0]
+        cutoff_time = datetime.strptime(shift_cutoff_str, "%H:%M:%S").time()    
+        def to_real_time(ts):
+            return ts + timedelta(days=1) if ts.time() < cutoff_time else ts    
+        smc_df['sort_key'] = smc_df['datetime'].apply(to_real_time)
+        smc_df = smc_df.sort_values('sort_key').reset_index(drop=True)
         smc_df['batch_counter'] = smc_df.groupby(config['Batch_reset']).cumcount() + 1
         smc_df['datetime'] = pd.to_datetime(smc_df['datetime'], format='%Y-%m-%d %H:%M')
-        return smc_df
+        smc_df.drop(columns=['sort_key'], inplace=True)
+        
+        return smc_df   # <-- also new, see below
  
     smc_df = smc_data_preprocessing(smc_df)
     
@@ -154,73 +173,72 @@ def run_etl(config, engine, connection, target_table):
     #             if start <= dt <= end:
     #                 return row['component_id']
     #     return None
-    def get_component_id(dt, prod_data, tolerance_minutes=45, debug=False):
-        """
-        Returns the ComponentId for datetime `dt` from prod_data (already in foundry time).
-        - Exact match wins.
-        - If dt lies between components, prefer *previous* component (never the next one).
-        - Tolerance only applies backward (after end time).
-        """
-        if pd.isna(dt):
-            return None
+    def get_component_id(dt, prod_data, tolerance_minutes=30, config=None, debug=False):
 
-        dt = pd.to_datetime(dt, errors='coerce')
         if pd.isna(dt):
             return None
+    
+        dt = pd.to_datetime(dt, errors='coerce')
+
+        if pd.isna(dt):
+            return None
+    
+        shift_cutoff_str = config["shift_time"]["A"][0] if config else "07:00:00"
+        cutoff_time = datetime.strptime(shift_cutoff_str, "%H:%M:%S").time()
+    
+        def to_real_time(ts):
+            if pd.isna(ts):
+                return ts
+            # anything before the foundry cutoff belongs to the NEXT real calendar day
+            return ts + timedelta(days=1) if ts.time() < cutoff_time else ts
 
         df = prod_data.copy()
-        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce')
-        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce')
-
+        df['StartTime'] = pd.to_datetime(df['StartTime'], errors='coerce').apply(to_real_time)
+        df['EndTime'] = pd.to_datetime(df['EndTime'], errors='coerce').apply(to_real_time)
+        dt_real = to_real_time(dt)
         nearest_component = None
         min_diff_seconds = float('inf')
-
+    
         for _, row in df.iterrows():
-            comp = row.get('component_id', None)
+            comp = row.get('ComponentId', None)
             if comp is None:
                 continue
-
             start = row['StartTime']
             end = row['EndTime']
             if pd.isna(start) or pd.isna(end):
                 continue
-
-            # Handle intervals crossing midnight
+    
             if end < start:
                 end += timedelta(days=1)
-
+    
             # --- Exact match ---
-            if start <= dt <= end:
+            if start <= dt_real <= end:
                 if debug:
-                    print(f" Exact match: {comp} ({start.time()} - {end.time()})")
+                    print(f" Exact match: {comp} ({start} - {end})")
                 return comp
-
-            # --- If dt is after end (backward tolerance) ---
-            if dt > end:
-                diff = (dt - end).total_seconds()
+    
+            # --- Backward tolerance ---
+            if dt_real > end:
+                diff = (dt_real - end).total_seconds()
                 if diff <= tolerance_minutes * 60 and diff < min_diff_seconds:
                     nearest_component = comp
                     min_diff_seconds = diff
                     if debug:
-                        print(f"⬅️  Using previous component {comp}, diff={diff/60:.1f} min")
-
-            # --- If dt < start (future interval) ---
-            # Skip — foundry rule: do not pick future component before it starts
-            elif dt < start:
+                        print(f"⬅️  Using previous component {comp}, diff={diff / 60:.1f} min")
+    
+            # --- Future interval: never pick it ---
+            elif dt_real < start:
                 continue
-
+    
         if debug:
-            if nearest_component:
-                print(f"Final chosen component: {nearest_component}")
-            else:
-                print("No component found within tolerance")
-
+            print(f"Final chosen component: {nearest_component}" if nearest_component else "No component found within tolerance")
+    
         return nearest_component
-
+    
     # matched_df['component_id'] = matched_df['datetime'].apply(get_component_id,tolerance_minutes=45)
 
-    matched_df['Component ID'] = matched_df['datetime'].apply(
-        lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30)
+    matched_df['component_id'] = matched_df['datetime'].apply(
+        lambda dt: get_component_id(dt, prod_data, tolerance_minutes=30, config=config)
     )
     matched_df['mixer_name'] = config['Mixer Name']
    
